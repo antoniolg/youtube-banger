@@ -48,6 +48,22 @@ function classifyVideo(title: string) {
   return "Dev general";
 }
 
+function formatAge(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "hace un momento";
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 60_000) return "hace 1m";
+  const totalHours = Math.floor(diffMs / 3_600_000);
+  if (totalHours < 1) {
+    const minutes = Math.max(1, Math.floor(diffMs / 60_000));
+    return `hace ${minutes}m`;
+  }
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (days > 0) return `hace ${days}d ${hours}h`;
+  return `hace ${hours}h`;
+}
+
 type Run = {
   id: number;
   query: string;
@@ -73,6 +89,10 @@ export default function App() {
   const [insights, setInsights] = useState<any>(null);
   const [topics, setTopics] = useState<any>(null);
   const [authority, setAuthority] = useState<any>(null);
+  const [nextActions, setNextActions] = useState<any>(null);
+  const [nextActionsError, setNextActionsError] = useState<string | null>(null);
+  const [nextActionsLoading, setNextActionsLoading] = useState(false);
+  const [nextActionsUpdatedAt, setNextActionsUpdatedAt] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<any>(null);
   const [topVideos, setTopVideos] = useState<any>(null);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
@@ -125,6 +145,8 @@ export default function App() {
 
     const authorityData = await authorityRes.json();
     setAuthority(authorityData || null);
+
+    fetchNextActions(runId);
   }
 
   async function fetchAnalytics() {
@@ -158,6 +180,27 @@ export default function App() {
     }
     setTopVideos(topData);
     setTopVideosError(null);
+  }
+
+  async function fetchNextActions(runId: number, refresh = false) {
+    setNextActionsLoading(true);
+    setNextActionsError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/insights/next-actions?runId=${runId}${refresh ? "&refresh=1" : ""}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudieron generar acciones.");
+      }
+      setNextActions(data.insights || null);
+      setNextActionsUpdatedAt(data.updatedAt || null);
+    } catch (err: any) {
+      setNextActionsError(err.message);
+      setNextActions(null);
+    } finally {
+      setNextActionsLoading(false);
+    }
   }
 
   async function handleIngest() {
@@ -299,6 +342,91 @@ export default function App() {
             <p className="muted">Conecta Analytics y ejecuta una investigación para ver el resumen.</p>
           )}
           {alert ? <div className="alert-card">{alert}</div> : null}
+        </section>
+
+        <section className="panel actions">
+          <div className="panel__header">
+            <h2>Próximas acciones</h2>
+            <div className="actions-meta">
+              <span className="muted">
+                {nextActionsUpdatedAt ? `Actualizado ${formatAge(nextActionsUpdatedAt)}` : "Sin datos"}
+              </span>
+              <button
+                className="action-button"
+                onClick={() => activeRun?.run?.id && fetchNextActions(activeRun.run.id, true)}
+                disabled={nextActionsLoading}
+              >
+                {nextActionsLoading ? "Generando..." : "Regenerar"}
+              </button>
+            </div>
+          </div>
+          {nextActionsError ? <div className="error">{nextActionsError}</div> : null}
+          {nextActions ? (
+            <div className="actions-grid">
+              {(Array.isArray(nextActions.acciones) ? nextActions.acciones : []).map(
+                (action: any, index: number) => (
+                  <article key={index} className="action-card">
+                    <div className="action-card__header">
+                      <span className="action-pill">Acción {action.prioridad ?? index + 1}</span>
+                      <h3>{action.titulo}</h3>
+                    </div>
+                    <p className="muted">{action.por_que}</p>
+                    <ul>
+                      {asList(action.pasos).map((item, i) => (
+                        <li key={i}>{item}</li>
+                      ))}
+                    </ul>
+                    <div className="action-meta">
+                      <span>Tiempo: {action.tiempo_estimado || "n/a"}</span>
+                      <span>KPI: {asList(action.kpi).join(", ")}</span>
+                    </div>
+                  </article>
+                )
+              )}
+              <article className="action-card plan-card">
+                <h3>Plan 30 días</h3>
+                <div className="plan-grid">
+                  {(Array.isArray(nextActions.plan_30_dias) ? nextActions.plan_30_dias : []).map(
+                    (week: any, index: number) => (
+                      <div key={index} className="plan-week">
+                        <h4>{week.semana || `Semana ${index + 1}`}</h4>
+                        <p className="muted">{week.objetivo}</p>
+                        <ul>
+                          {asList(week.entregables).map((item, i) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )
+                  )}
+                </div>
+              </article>
+              {Array.isArray(nextActions.metricas_clave) ? (
+                <article className="action-card">
+                  <h3>Métricas clave</h3>
+                  <ul>
+                    {nextActions.metricas_clave.map((metric: string, i: number) => (
+                      <li key={i}>{metric}</li>
+                    ))}
+                  </ul>
+                </article>
+              ) : null}
+              {Array.isArray(nextActions.alertas) && nextActions.alertas.length ? (
+                <article className="action-card">
+                  <h3>Alertas</h3>
+                  <ul>
+                    {nextActions.alertas.map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
+              ) : null}
+            </div>
+          ) : nextActionsLoading ? (
+            <p className="muted">Generando acciones prácticas...</p>
+          ) : (
+            <p className="muted">Pulsa “Regenerar” para obtener acciones.</p>
+          )}
         </section>
 
         <section className="panel">

@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS search_run_videos (
   PRIMARY KEY (run_id, video_id)
 );
 
+CREATE TABLE IF NOT EXISTS insights_cache (
+  run_id INT NOT NULL REFERENCES search_runs(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  content JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (run_id, type)
+);
+
 CREATE TABLE IF NOT EXISTS oauth_tokens (
   provider TEXT PRIMARY KEY,
   access_token TEXT,

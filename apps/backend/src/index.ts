@@ -257,6 +257,14 @@ app.get("/api/insights/overview", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
     if (!runId) return res.status(400).json({ error: "runId is required" });
+    const refresh = req.query.refresh === "1";
+
+    if (!refresh) {
+      const cached = await getCachedInsight(runId, "overview");
+      if (cached) {
+        return res.json({ insights: cached.content, cached: true, updatedAt: cached.updatedAt });
+      }
+    }
 
     const videosResult = await pool.query(
       `SELECT v.title, v.view_count, v.published_at, v.duration_seconds, c.title AS channel_title
@@ -271,8 +279,8 @@ app.get("/api/insights/overview", async (req, res) => {
 
     const prompt = buildInsightsPrompt(videosResult.rows);
     const insights = await generateInsights(prompt);
-
-    res.json({ insights });
+    const updatedAt = await saveCachedInsight(runId, "overview", insights);
+    res.json({ insights, cached: false, updatedAt });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Unexpected error" });
   }
@@ -282,6 +290,14 @@ app.get("/api/insights/topics", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
     if (!runId) return res.status(400).json({ error: "runId is required" });
+    const refresh = req.query.refresh === "1";
+
+    if (!refresh) {
+      const cached = await getCachedInsight(runId, "topics");
+      if (cached) {
+        return res.json({ insights: cached.content, cached: true, updatedAt: cached.updatedAt });
+      }
+    }
 
     const videosResult = await pool.query(
       `SELECT v.title, v.description, v.view_count, c.title AS channel_title
@@ -296,7 +312,8 @@ app.get("/api/insights/topics", async (req, res) => {
 
     const prompt = buildTopicsPrompt(videosResult.rows);
     const insights = await generateInsights(prompt);
-    res.json({ insights });
+    const updatedAt = await saveCachedInsight(runId, "topics", insights);
+    res.json({ insights, cached: false, updatedAt });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Unexpected error" });
   }
@@ -306,6 +323,14 @@ app.get("/api/insights/next-actions", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
     if (!runId) return res.status(400).json({ error: "runId is required" });
+    const refresh = req.query.refresh === "1";
+
+    if (!refresh) {
+      const cached = await getCachedInsight(runId, "next-actions");
+      if (cached) {
+        return res.json({ insights: cached.content, cached: true, updatedAt: cached.updatedAt });
+      }
+    }
 
     const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [runId]);
     if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
@@ -360,7 +385,8 @@ app.get("/api/insights/next-actions", async (req, res) => {
     });
 
     const insights = await generateInsights(prompt);
-    res.json({ insights });
+    const updatedAt = await saveCachedInsight(runId, "next-actions", insights);
+    res.json({ insights, cached: false, updatedAt });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Unexpected error" });
   }
@@ -612,6 +638,31 @@ function computeFocusRatio(items: any[]) {
     total: items.length,
     ratio: aiCount / items.length,
   };
+}
+
+async function getCachedInsight(runId: number, type: string) {
+  const result = await pool.query(
+    "SELECT content, updated_at FROM insights_cache WHERE run_id = $1 AND type = $2",
+    [runId, type]
+  );
+  if (result.rows.length === 0) return null;
+  return {
+    content: result.rows[0].content,
+    updatedAt: result.rows[0].updated_at,
+  };
+}
+
+async function saveCachedInsight(runId: number, type: string, content: any) {
+  const result = await pool.query(
+    `INSERT INTO insights_cache (run_id, type, content, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (run_id, type) DO UPDATE SET
+       content = EXCLUDED.content,
+       updated_at = NOW()
+     RETURNING updated_at`,
+    [runId, type, content]
+  );
+  return result.rows[0]?.updated_at ?? new Date().toISOString();
 }
 
 async function saveRun(params: {

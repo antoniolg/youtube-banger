@@ -34,6 +34,7 @@ go run . --query "IA aplicada al desarrollo de software" --max 25
 - GET `/api/runs/:id`
 - GET `/api/insights/overview?runId=ID`
 - GET `/api/insights/topics?runId=ID`
+- GET `/api/insights/next-actions?runId=ID`
 - GET `/api/analysis/authority?runId=ID`
 - GET `/api/oauth/google/start`
 - GET `/api/oauth/google/callback`

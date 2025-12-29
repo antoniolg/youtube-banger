@@ -179,6 +179,29 @@ button:disabled {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(243, 225, 210, 0.7));
 }
 
+.panel.actions {
+  border: 1px solid rgba(31, 110, 122, 0.2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(236, 245, 247, 0.7));
+}
+
+.action-button {
+  background: rgba(31, 110, 122, 0.15);
+  color: var(--aqua);
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  box-shadow: none;
+}
+
+.action-button:hover {
+  transform: none;
+}
+
+.actions-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
 .summary-grid {
   display: grid;
   gap: 1rem;
@@ -199,6 +222,61 @@ button:disabled {
   background: rgba(195, 84, 42, 0.12);
   border: 1px solid rgba(195, 84, 42, 0.3);
   font-weight: 600;
+}
+
+.actions-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.action-card {
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  border: 1px solid rgba(20, 17, 13, 0.1);
+  display: grid;
+  gap: 0.6rem;
+}
+
+.action-card__header h3 {
+  margin-top: 0.4rem;
+}
+
+.action-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(31, 110, 122, 0.2);
+  color: var(--aqua);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-family: "Syne", sans-serif;
+}
+
+.action-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.plan-card {
+  grid-column: 1 / -1;
+}
+
+.plan-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.plan-week ul {
+  margin: 0.4rem 0 0 0;
+  padding-left: 1.2rem;
 }
 
 .panel__header {
