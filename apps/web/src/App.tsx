@@ -113,6 +113,10 @@ export default function App() {
   const [monthPlanLoading, setMonthPlanLoading] = useState(false);
   const [monthPlanError, setMonthPlanError] = useState<string | null>(null);
   const [monthPlanUpdatedAt, setMonthPlanUpdatedAt] = useState<string | null>(null);
+  const [globalInspiration, setGlobalInspiration] = useState<any>(null);
+  const [globalLoading, setGlobalLoading] = useState(false);
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [globalUpdatedAt, setGlobalUpdatedAt] = useState<string | null>(null);
   const [insightsRefreshing, setInsightsRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
   const [topVideos, setTopVideos] = useState<any>(null);
@@ -162,6 +166,7 @@ export default function App() {
     setActiveRun(data);
     await fetchInsights(runId);
     fetchMonthPlan(runId);
+    fetchGlobalInspiration(runId);
   }
 
   async function fetchAnalytics() {
@@ -215,6 +220,27 @@ export default function App() {
       setMonthPlan(null);
     } finally {
       setMonthPlanLoading(false);
+    }
+  }
+
+  async function fetchGlobalInspiration(runId: number, refresh = false) {
+    setGlobalLoading(true);
+    setGlobalError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/inspiration/global?runId=${runId}${refresh ? "&refresh=1" : ""}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo cargar la inspiración global.");
+      }
+      setGlobalInspiration(data.data || null);
+      setGlobalUpdatedAt(data.updatedAt || null);
+    } catch (err: any) {
+      setGlobalError(err.message);
+      setGlobalInspiration(null);
+    } finally {
+      setGlobalLoading(false);
     }
   }
 
@@ -900,6 +926,107 @@ export default function App() {
               </article>
             ))}
           </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel__header">
+            <h2>Inspiración global</h2>
+            <div className="actions-meta">
+              <span className="muted">
+                {globalUpdatedAt ? `Actualizado ${formatAge(globalUpdatedAt)}` : "Sin datos"}
+              </span>
+              <button
+                className={`action-button ${globalLoading ? "is-loading" : ""}`}
+                onClick={() => activeRun?.run?.id && fetchGlobalInspiration(activeRun.run.id, true)}
+                disabled={globalLoading}
+                aria-busy={globalLoading}
+              >
+                {globalLoading ? "Actualizando..." : "Actualizar"}
+              </button>
+            </div>
+          </div>
+          {globalError ? <div className="error">{globalError}</div> : null}
+          {globalInspiration ? (
+            <div className="global-grid">
+              <div>
+                <p className="muted">Query: {globalInspiration.query}</p>
+                <div className="global-section">
+                  <h3>Formatos importables</h3>
+                  <ul className="series-list">
+                    {asList(globalInspiration.insights?.formatos).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="global-section">
+                  <h3>Series que funcionan fuera</h3>
+                  <ul className="series-list">
+                    {asList(globalInspiration.insights?.series_ideas).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="global-section">
+                  <h3>Tendencias</h3>
+                  <ul className="series-list">
+                    {asList(globalInspiration.insights?.tendencias).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="global-section">
+                  <h3>Ángulos clave</h3>
+                  <ul className="series-list">
+                    {asList(globalInspiration.insights?.angulos_clave).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              <div>
+                <h3>Videos globales con tracción</h3>
+                <div className="videos">
+                  {(Array.isArray(globalInspiration.videos) ? globalInspiration.videos : []).map((video: any) => (
+                    <article key={video.id} className="video-row">
+                      <a
+                        className="link-reset"
+                        href={`https://www.youtube.com/watch?v=${video.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <img
+                          src={proxyImage(video.thumbnailUrl)}
+                          onError={(event) => {
+                            event.currentTarget.src = PLACEHOLDER_VIDEO;
+                          }}
+                          alt=""
+                          loading="lazy"
+                        />
+                      </a>
+                      <div>
+                        <a
+                          className="link-reset"
+                          href={`https://www.youtube.com/watch?v=${video.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <h4>{video.title}</h4>
+                        </a>
+                        <p>
+                          {video.channelTitle} · {Number(video.viewCount || 0).toLocaleString("es-ES")} vistas
+                        </p>
+                      </div>
+                      <span className="pill">{Math.round((video.durationSeconds || 0) / 60)} min</span>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : globalLoading ? (
+            <p className="muted">Cargando inspiración global...</p>
+          ) : (
+            <p className="muted">Pulsa “Actualizar” para cargar inspiración global.</p>
+          )}
         </section>
       </main>
     </div>

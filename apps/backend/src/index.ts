@@ -512,6 +512,60 @@ app.get("/api/plan/month", async (req, res) => {
   }
 });
 
+app.get("/api/inspiration/global", async (req, res) => {
+  try {
+    const runId = Number(req.query.runId);
+    if (!runId) return res.status(400).json({ error: "runId is required" });
+    const refresh = req.query.refresh === "1";
+
+    if (!refresh) {
+      const cached = await getCachedInsight(runId, "global-inspiration");
+      if (cached) {
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(runId, "global-inspiration", normalized);
+        }
+        return res.json({ data: normalized, cached: true, updatedAt: cached.updatedAt });
+      }
+    }
+
+    const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [runId]);
+    if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
+
+    const globalQuery = buildGlobalQuery(runResult.rows[0].query);
+    const searchResults = await searchVideos({
+      query: globalQuery,
+      maxResults: 30,
+      regionCode: "US",
+      relevanceLanguage: "en",
+    });
+    const videoIds = Array.from(new Set(searchResults.map((item) => item.videoId)));
+    const details = await fetchVideoDetails(videoIds);
+    const videos = details
+      .filter((item) => (item.durationSeconds ?? 0) >= MIN_LONG_SECONDS)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        channelTitle: item.channelTitle,
+        viewCount: item.viewCount,
+        durationSeconds: item.durationSeconds,
+        thumbnailUrl: item.thumbnailUrl,
+      }))
+      .sort((a, b) => (b.viewCount ?? 0) - (a.viewCount ?? 0))
+      .slice(0, 20);
+
+    const prompt = buildGlobalInspirationPrompt(videos, globalQuery);
+    const rawInsights = await generateInsights(prompt, GLOBAL_INSPIRATION_SCHEMA);
+    const insights = normalizeGeminiInsight(rawInsights);
+
+    const payload = { query: globalQuery, insights, videos };
+    const updatedAt = await saveCachedInsight(runId, "global-inspiration", payload);
+    res.json({ data: payload, cached: false, updatedAt });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
 app.get("/api/analysis/authority", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
@@ -883,6 +937,55 @@ Reglas:
 - Duración recomendada basada en p50/p75 del mercado.
 - Cada video debe ser accionable y viable de preparar en el tiempo indicado.
 - Prioriza autoridad técnica sobre viralidad.`;
+}
+
+function buildGlobalQuery(query: string) {
+  const normalized = query.toLowerCase();
+  if (normalized.includes("desarrollo de software") || normalized.includes("software")) {
+    return "AI software engineering";
+  }
+  if (normalized.includes("ia") || normalized.includes("inteligencia artificial")) {
+    return "AI applied to software development";
+  }
+  return `AI ${query}`;
+}
+
+const GLOBAL_INSPIRATION_SCHEMA = {
+  type: "object",
+  properties: {
+    formatos: { type: "array", items: { type: "string" } },
+    series_ideas: { type: "array", items: { type: "string" } },
+    tendencias: { type: "array", items: { type: "string" } },
+    angulos_clave: { type: "array", items: { type: "string" } },
+  },
+  required: ["formatos", "series_ideas", "tendencias", "angulos_clave"],
+  additionalProperties: false,
+};
+
+function buildGlobalInspirationPrompt(videos: any[], query: string) {
+  const list = videos
+    .slice(0, 18)
+    .map(
+      (video: any) =>
+        `- ${video.title} | ${video.channelTitle} | ${video.viewCount ?? "n/a"} views | ${Math.round(
+          (video.durationSeconds ?? 0) / 60
+        )} min`
+    )
+    .join("\n");
+
+  return `Eres estratega de contenido para YouTube en español.
+Analiza esta muestra de videos globales en inglés sobre "${query}" y devuelve SOLO JSON válido en español con esta estructura:
+{
+  "formatos": ["...","..."],
+  "series_ideas": ["...","..."],
+  "tendencias": ["...","..."],
+  "angulos_clave": ["...","..."]
+}
+
+Muestra:
+${list}
+
+Reglas: ideas importables al mercado hispano, tono autoridad técnica, evita clickbait.`;
 }
 
 async function safeAnalyticsSummary() {
