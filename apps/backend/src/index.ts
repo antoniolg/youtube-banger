@@ -12,8 +12,6 @@ const app = express();
 const port = Number(process.env.PORT || 8080);
 const MIN_LONG_SECONDS = 150;
 const MAX_WEEKLY_HOURS = 8;
-const LEAD_MAGNET =
-  "Plantilla de Spec Driven Development con prompts + Gem de Gemini para automatizar el flujo";
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json({ limit: "2mb" }));
@@ -879,7 +877,7 @@ Condiciones del canal:
 - Tiempo disponible: ${payload.maxWeeklyHours} horas por semana
 - Cadencia deseada: 1 video/semana, pero puedes recomendar 2/mes si la complejidad lo exige.
 - Duración objetivo: videos largos (15-30 min) basados en tendencia del mercado.
-- CTA: usar lead magnet "${LEAD_MAGNET}" en 2 videos, 1 video con CTA suave (newsletter/lista espera), 1 video con CTA directo a la formación.
+- CTA: 2 videos con lead magnet (escribir "Lead magnet (elige cuál)"), 1 video con CTA suave (newsletter/lista espera), 1 video con CTA directo a la formación.
 
 Datos del mercado:
 - Query: ${run.query}
@@ -933,9 +931,10 @@ Devuelve SOLO JSON valido con esta estructura exacta:
 
 Reglas:
 - No excedas ${payload.maxWeeklyHours} horas por semana.
-- Si recomiendas 2 videos/mes, asigna Semana 1 y Semana 3.
+- Si recomiendas 2 videos/mes, asigna Semana 1 y Semana 3 y usa 1 CTA lead magnet + 1 CTA directo.
 - Duración recomendada basada en p50/p75 del mercado.
 - Cada video debe ser accionable y viable de preparar en el tiempo indicado.
+- Evita repetir títulos o ángulos entre sí.
 - Prioriza autoridad técnica sobre viralidad.`;
 }
 
