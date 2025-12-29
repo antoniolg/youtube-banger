@@ -106,12 +106,13 @@ export default function App() {
   const [topicsStartedAt, setTopicsStartedAt] = useState<number | null>(null);
   const [authorityStartedAt, setAuthorityStartedAt] = useState<number | null>(null);
   const [, setLoadingTick] = useState(0);
+  const [showAuthority, setShowAuthority] = useState(false);
   const [overviewUpdatedAt, setOverviewUpdatedAt] = useState<string | null>(null);
   const [topicsUpdatedAt, setTopicsUpdatedAt] = useState<string | null>(null);
-  const [nextActions, setNextActions] = useState<any>(null);
-  const [nextActionsError, setNextActionsError] = useState<string | null>(null);
-  const [nextActionsLoading, setNextActionsLoading] = useState(false);
-  const [nextActionsUpdatedAt, setNextActionsUpdatedAt] = useState<string | null>(null);
+  const [monthPlan, setMonthPlan] = useState<any>(null);
+  const [monthPlanLoading, setMonthPlanLoading] = useState(false);
+  const [monthPlanError, setMonthPlanError] = useState<string | null>(null);
+  const [monthPlanUpdatedAt, setMonthPlanUpdatedAt] = useState<string | null>(null);
   const [insightsRefreshing, setInsightsRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
   const [topVideos, setTopVideos] = useState<any>(null);
@@ -160,7 +161,7 @@ export default function App() {
     const data = await res.json();
     setActiveRun(data);
     await fetchInsights(runId);
-    fetchNextActions(runId);
+    fetchMonthPlan(runId);
   }
 
   async function fetchAnalytics() {
@@ -196,24 +197,24 @@ export default function App() {
     setTopVideosError(null);
   }
 
-  async function fetchNextActions(runId: number, refresh = false) {
-    setNextActionsLoading(true);
-    setNextActionsError(null);
+  async function fetchMonthPlan(runId: number, refresh = false) {
+    setMonthPlanLoading(true);
+    setMonthPlanError(null);
     try {
       const res = await fetch(
-        `${API_BASE}/api/insights/next-actions?runId=${runId}${refresh ? "&refresh=1" : ""}`
+        `${API_BASE}/api/plan/month?runId=${runId}${refresh ? "&refresh=1" : ""}`
       );
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "No se pudieron generar acciones.");
+        throw new Error(data.error || "No se pudo generar el plan del mes.");
       }
-      setNextActions(data.insights || null);
-      setNextActionsUpdatedAt(data.updatedAt || null);
+      setMonthPlan(data.plan || null);
+      setMonthPlanUpdatedAt(data.updatedAt || null);
     } catch (err: any) {
-      setNextActionsError(err.message);
-      setNextActions(null);
+      setMonthPlanError(err.message);
+      setMonthPlan(null);
     } finally {
-      setNextActionsLoading(false);
+      setMonthPlanLoading(false);
     }
   }
 
@@ -309,13 +310,13 @@ export default function App() {
   }, [insights]);
 
   const lastInsightUpdate = useMemo(() => {
-    const dates = [overviewUpdatedAt, topicsUpdatedAt, nextActionsUpdatedAt]
+    const dates = [overviewUpdatedAt, topicsUpdatedAt, monthPlanUpdatedAt]
       .filter(Boolean)
       .map((value) => new Date(value as string).getTime())
       .filter((value) => Number.isFinite(value));
     if (!dates.length) return null;
     return new Date(Math.max(...dates)).toISOString();
-  }, [overviewUpdatedAt, topicsUpdatedAt, nextActionsUpdatedAt]);
+  }, [overviewUpdatedAt, topicsUpdatedAt, monthPlanUpdatedAt]);
 
   return (
     <div className="app">
@@ -388,121 +389,77 @@ export default function App() {
           {alert ? <div className="alert-card">{alert}</div> : null}
         </section>
 
-        <section className="panel actions">
+        <section className="panel plan">
           <div className="panel__header">
-            <h2>Próximas acciones</h2>
+            <h2>Plan del mes</h2>
             <div className="actions-meta">
               <span className="muted">
-                {nextActionsUpdatedAt ? `Actualizado ${formatAge(nextActionsUpdatedAt)}` : "Sin datos"}
+                {monthPlanUpdatedAt ? `Actualizado ${formatAge(monthPlanUpdatedAt)}` : "Sin datos"}
               </span>
               <button
-                className={`action-button ${nextActionsLoading ? "is-loading" : ""}`}
-                onClick={() => activeRun?.run?.id && fetchNextActions(activeRun.run.id, true)}
-                disabled={nextActionsLoading}
-                aria-busy={nextActionsLoading}
+                className={`action-button ${monthPlanLoading ? "is-loading" : ""}`}
+                onClick={() => activeRun?.run?.id && fetchMonthPlan(activeRun.run.id, true)}
+                disabled={monthPlanLoading}
+                aria-busy={monthPlanLoading}
               >
-                {nextActionsLoading ? "Regenerando..." : "Regenerar"}
+                {monthPlanLoading ? "Generando..." : "Regenerar plan"}
               </button>
             </div>
           </div>
-          {nextActionsError ? <div className="error">{nextActionsError}</div> : null}
-          {nextActions ? (
-            <div className="actions-grid">
-              {(Array.isArray(nextActions.acciones) ? nextActions.acciones : []).map(
-                (action: any, index: number) => (
-                  <article key={index} className="action-card">
-                    <div className="action-card__header">
-                      <span className="action-pill">Acción {action.prioridad ?? index + 1}</span>
-                      <h3>{action.titulo}</h3>
-                    </div>
-                    <p className="muted">{action.por_que}</p>
-                    <ul>
-                      {asList(action.pasos).map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
-                    <div className="action-meta">
-                      <span>Tiempo: {action.tiempo_estimado || "n/a"}</span>
-                      <span>KPI: {asList(action.kpi).join(", ")}</span>
-                    </div>
-                  </article>
-                )
-              )}
-              <article className="action-card plan-card">
-                <h3>Plan 30 días</h3>
-                <div className="plan-grid">
-                  {(Array.isArray(nextActions.plan_30_dias) ? nextActions.plan_30_dias : []).map(
-                    (week: any, index: number) => (
-                      <div key={index} className="plan-week">
-                        <h4>{week.semana || `Semana ${index + 1}`}</h4>
-                        <p className="muted">{week.objetivo}</p>
-                        <ul>
-                          {asList(week.entregables).map((item, i) => (
-                            <li key={i}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )
-                  )}
+          {monthPlanError ? <div className="error">{monthPlanError}</div> : null}
+          {monthPlan ? (
+            <div className="plan-grid month-plan-grid">
+              <article className="month-plan-card month-plan-summary">
+                <h3>{monthPlan.objetivo_mes || "Objetivo del mes"}</h3>
+                <p className="muted">{monthPlan.motivo_cadencia}</p>
+                <div className="plan-meta">
+                  <span className="pill">{monthPlan.cadencia_recomendada}</span>
+                  <span className="pill">{monthPlan.duracion_recomendada}</span>
                 </div>
-              </article>
-              {Array.isArray(nextActions.metricas_clave) ? (
-                <article className="action-card">
-                  <h3>Métricas clave</h3>
+                {Array.isArray(monthPlan.metricas_clave) ? (
                   <ul>
-                    {nextActions.metricas_clave.map((metric: string, i: number) => (
+                    {monthPlan.metricas_clave.map((metric: string, i: number) => (
                       <li key={i}>{metric}</li>
                     ))}
                   </ul>
-                </article>
-              ) : null}
-              {Array.isArray(nextActions.alertas) && nextActions.alertas.length ? (
-                <article className="action-card">
-                  <h3>Alertas</h3>
+                ) : null}
+              </article>
+
+              {(Array.isArray(monthPlan.videos) ? monthPlan.videos : []).map((video: any, index: number) => (
+                <article key={index} className="month-plan-card">
+                  <div className="plan-card__header">
+                    <span className="action-pill">{video.semana || `Semana ${index + 1}`}</span>
+                    <span className="pill">{video.esfuerzo || "medio"}</span>
+                  </div>
+                  <h3>{video.titulo}</h3>
+                  <p className="muted">{video.angulo}</p>
                   <ul>
-                    {nextActions.alertas.map((item: string, i: number) => (
+                    {asList(video.estructura).map((item, i) => (
                       <li key={i}>{item}</li>
                     ))}
                   </ul>
+                  <div className="action-meta">
+                    <span>Duración: {video.duracion || "n/a"}</span>
+                    <span>Horas: {video.horas_estimadas ?? "n/a"}h</span>
+                  </div>
+                  <p className="muted">CTA: {video.cta}</p>
+                  <p className="muted">Razón: {video.razon}</p>
                 </article>
-              ) : null}
+              ))}
             </div>
-          ) : nextActionsLoading ? (
-            <p className="muted">Generando acciones prácticas...</p>
+          ) : monthPlanLoading ? (
+            <p className="muted">Generando plan mensual...</p>
           ) : (
-            <p className="muted">Pulsa “Regenerar” para obtener acciones.</p>
+            <p className="muted">Pulsa “Regenerar plan” para obtener el plan del mes.</p>
           )}
-        </section>
-
-        <section className="panel">
-          <div className="panel__header">
-            <h2>Historial de exploraciones</h2>
-            <span>{runs.length} runs</span>
-          </div>
-          <div className="runs">
-            {runs.map((run) => (
-              <button
-                key={run.id}
-                className={`run-card ${activeRun?.run?.id === run.id ? "active" : ""}`}
-                onClick={() => loadRun(run.id)}
-              >
-                <div>
-                  <p className="run-card__query">{run.query}</p>
-                  <p className="run-card__meta">
-                    {new Date(run.created_at).toLocaleString("es-ES")}
-                  </p>
-                </div>
-                <span>{run.video_count ?? 0} videos</span>
-              </button>
-            ))}
-          </div>
         </section>
 
         <section className="panel focus">
           <div className="panel__header">
-            <h2>Lectura rápida del mercado</h2>
+            <h2>Implicaciones del mercado</h2>
             <span>Última corrida</span>
           </div>
+          <p className="muted">Señales que alimentan el plan del mes.</p>
           <div className="stats">
             <div className="stat">
               <p>Promedio de vistas</p>
@@ -519,7 +476,7 @@ export default function App() {
           </div>
 
           <div className="insights">
-            <h3>Señales de autoridad</h3>
+            <h3>Señales clave</h3>
             {insights ? (
               <div className="insights__grid">
                 {insightEntries.map(([key, values]) => (
@@ -542,9 +499,25 @@ export default function App() {
         <section className="panel">
           <div className="panel__header">
             <h2>Score de autoridad</h2>
-            <span>Top señales</span>
+            <div className="actions-meta">
+              <button
+                className="action-button"
+                onClick={() => setShowAuthority((value) => !value)}
+                aria-expanded={showAuthority}
+              >
+                {showAuthority ? "Ocultar benchmark" : "Ver benchmark"}
+              </button>
+            </div>
           </div>
-          {authorityLoading ? (
+          <p className="muted">
+            Score basado en profundidad, metodología, engagement relativo y recencia (con penalización de clickbait).
+            Úsalo como benchmark del estándar de autoridad en tu nicho.
+          </p>
+          {!showAuthority ? (
+            <p className="muted">
+              Benchmark oculto. Úsalo cuando quieras comparar tu estándar con el mercado.
+            </p>
+          ) : authorityLoading ? (
             <div className="loading-card">
               <div className="loading-row">
                 <span className="loading-spinner" aria-hidden="true" />
@@ -669,46 +642,52 @@ export default function App() {
               <p>{topicsError}</p>
             </div>
           ) : topics ? (
-            <div className="topics-grid">
-              <div className="topics-section">
-                <h3>Clusters dominantes</h3>
-                <div className="cluster-grid">
+            <div className="topics-layout">
+              <div className="topics-column">
+                <h3>Pilares (clusters)</h3>
+                <div className="cluster-grid compact">
                   {(Array.isArray(topics.clusters) ? topics.clusters : []).map((cluster: any, index: number) => (
                     <article key={index} className="cluster-card">
                       <h4>{cluster.nombre}</h4>
                       <p>{cluster.descripcion}</p>
                       <ul>
-                        {(Array.isArray(cluster.ejemplos) ? cluster.ejemplos : []).map((item: string, i: number) => (
-                          <li key={i}>{item}</li>
-                        ))}
+                        {(Array.isArray(cluster.ejemplos) ? cluster.ejemplos : [])
+                          .slice(0, 2)
+                          .map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
                       </ul>
                     </article>
                   ))}
                 </div>
               </div>
-              <div className="topics-section">
-                <h3>Gaps y oportunidades</h3>
-                <div className="gap-list">
-                  {asList(topics.gaps).map((gap: string, i: number) => (
-                    <span key={i} className="gap-pill">
-                      {gap}
-                    </span>
-                  ))}
+              <div className="topics-column">
+                <div className="topics-block">
+                  <h3>Series recomendadas</h3>
+                  <ul className="series-list">
+                    {asList(topics.series_ideas).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
                 </div>
-                <h3>Series recomendadas</h3>
-                <ul className="series-list">
-                  {asList(topics.series_ideas).map((item: string, i: number) => (
-                    <li key={i}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="topics-section">
-                <h3>Enfoque de autoridad</h3>
-                <ul className="series-list">
-                  {asList(topics.enfoque_autoridad).map((item: string, i: number) => (
-                    <li key={i}>{item}</li>
-                  ))}
-                </ul>
+                <div className="topics-block">
+                  <h3>Gaps y oportunidades</h3>
+                  <div className="gap-list">
+                    {asList(topics.gaps).map((gap: string, i: number) => (
+                      <span key={i} className="gap-pill">
+                        {gap}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="topics-block">
+                  <h3>Enfoque de autoridad</h3>
+                  <ul className="series-list">
+                    {asList(topics.enfoque_autoridad).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
           ) : (
@@ -983,7 +962,7 @@ export default function App() {
     setInsightsRefreshing(true);
     await Promise.all([
       fetchInsights(activeRun.run.id, true),
-      fetchNextActions(activeRun.run.id, true),
+      fetchMonthPlan(activeRun.run.id, true),
     ]);
     setInsightsRefreshing(false);
   }

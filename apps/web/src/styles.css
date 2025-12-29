@@ -387,6 +387,43 @@ button:disabled {
   padding-left: 1.2rem;
 }
 
+.panel.plan {
+  border: 1px solid rgba(31, 110, 122, 0.18);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(231, 240, 244, 0.75));
+}
+
+.month-plan-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.month-plan-card {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  border: 1px solid rgba(20, 17, 13, 0.08);
+  display: grid;
+  gap: 0.6rem;
+}
+
+.month-plan-summary {
+  grid-column: 1 / -1;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.plan-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
 .panel__header {
   display: flex;
   align-items: center;
@@ -658,19 +695,29 @@ button:disabled {
   border-radius: 999px;
 }
 
-.topics-grid {
+.topics-layout {
   display: grid;
   gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
-.topics-section h3 {
-  margin-bottom: 0.8rem;
+.topics-column {
+  display: grid;
+  gap: 1rem;
+}
+
+.topics-block h3 {
+  margin-bottom: 0.6rem;
 }
 
 .cluster-grid {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.cluster-grid.compact {
+  grid-template-columns: 1fr;
 }
 
 .cluster-card {

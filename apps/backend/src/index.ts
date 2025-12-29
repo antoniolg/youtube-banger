@@ -11,6 +11,9 @@ import { computeAuthority } from "./analysis.js";
 const app = express();
 const port = Number(process.env.PORT || 8080);
 const MIN_LONG_SECONDS = 150;
+const MAX_WEEKLY_HOURS = 8;
+const LEAD_MAGNET =
+  "Plantilla de Spec Driven Development con prompts + Gem de Gemini para automatizar el flujo";
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json({ limit: "2mb" }));
@@ -418,6 +421,97 @@ app.get("/api/insights/next-actions", async (req, res) => {
   }
 });
 
+app.get("/api/plan/month", async (req, res) => {
+  try {
+    const runId = Number(req.query.runId);
+    if (!runId) return res.status(400).json({ error: "runId is required" });
+    const refresh = req.query.refresh === "1";
+
+    if (!refresh) {
+      const cached = await getCachedInsight(runId, "month-plan");
+      if (cached) {
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(runId, "month-plan", normalized);
+        }
+        return res.json({ plan: normalized, cached: true, updatedAt: cached.updatedAt });
+      }
+    }
+
+    const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [runId]);
+    if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
+
+    const videosResult = await pool.query(
+      `SELECT v.id, v.title, v.description, v.published_at, v.duration_seconds, v.view_count,
+              v.channel_id, c.title AS channel_title
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
+       ORDER BY v.view_count DESC NULLS LAST
+       LIMIT 45`,
+      [runId, MIN_LONG_SECONDS]
+    );
+
+    const channelsResult = await pool.query(
+      `SELECT v.channel_id, c.title, c.subscriber_count
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
+       GROUP BY v.channel_id, c.title, c.subscriber_count
+       ORDER BY c.subscriber_count DESC NULLS LAST
+       LIMIT 10`,
+      [runId, MIN_LONG_SECONDS]
+    );
+
+    const statsResult = await pool.query(
+      `SELECT COUNT(*)::int AS videos, AVG(view_count)::float8 AS avg_views, AVG(duration_seconds)::float8 AS avg_duration
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2`,
+      [runId, MIN_LONG_SECONDS]
+    );
+
+    const authority = computeAuthority(videosResult.rows);
+    const analytics = await safeAnalyticsSummary();
+    const topVideos = await safeAnalyticsTopVideos();
+    const focusRatio = computeFocusRatio(topVideos?.items || []);
+
+    const durations = videosResult.rows
+      .map((row: any) => row.duration_seconds)
+      .filter((value: number | null) => Number.isFinite(value) && (value ?? 0) > 0) as number[];
+    const durationStats = buildDurationStats(durations);
+
+    const cachedTopics = await getCachedInsight(runId, "topics");
+    const topicsSummary = cachedTopics ? normalizeGeminiInsight(cachedTopics.content) : null;
+
+    const prompt = buildMonthPlanPrompt({
+      run: runResult.rows[0],
+      stats: statsResult.rows[0],
+      videos: videosResult.rows,
+      channels: channelsResult.rows,
+      authority,
+      analytics,
+      topVideos,
+      focusRatio,
+      durationStats,
+      topicsSummary,
+      maxWeeklyHours: MAX_WEEKLY_HOURS,
+    });
+
+    const rawPlan = await generateInsights(prompt, MONTH_PLAN_SCHEMA);
+    const plan = normalizeGeminiInsight(rawPlan);
+    const updatedAt = await saveCachedInsight(runId, "month-plan", plan);
+    res.json({ plan, cached: false, updatedAt });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
 app.get("/api/analysis/authority", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
@@ -649,6 +743,148 @@ const NEXT_ACTIONS_SCHEMA = {
   additionalProperties: false,
 };
 
+const MONTH_PLAN_SCHEMA = {
+  type: "object",
+  properties: {
+    objetivo_mes: { type: "string" },
+    cadencia_recomendada: { type: "string" },
+    motivo_cadencia: { type: "string" },
+    duracion_recomendada: { type: "string" },
+    videos: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          semana: { type: "string" },
+          titulo: { type: "string" },
+          angulo: { type: "string" },
+          estructura: { type: "array", items: { type: "string" } },
+          duracion: { type: "string" },
+          esfuerzo: { type: "string" },
+          horas_estimadas: { type: "number" },
+          cta: { type: "string" },
+          razon: { type: "string" },
+        },
+        required: [
+          "semana",
+          "titulo",
+          "angulo",
+          "estructura",
+          "duracion",
+          "esfuerzo",
+          "horas_estimadas",
+          "cta",
+          "razon",
+        ],
+        additionalProperties: false,
+      },
+    },
+    metricas_clave: { type: "array", items: { type: "string" } },
+  },
+  required: [
+    "objetivo_mes",
+    "cadencia_recomendada",
+    "motivo_cadencia",
+    "duracion_recomendada",
+    "videos",
+    "metricas_clave",
+  ],
+  additionalProperties: false,
+};
+
+function buildMonthPlanPrompt(payload: any) {
+  const { run, stats, videos, channels, authority, analytics, topVideos, focusRatio, durationStats, topicsSummary } =
+    payload;
+  const marketSample = videos
+    .slice(0, 18)
+    .map(
+      (video: any) =>
+        `- ${video.title} | ${video.channel_title} | ${video.view_count ?? "n/a"} views | ${Math.round(
+          (video.duration_seconds ?? 0) / 60
+        )} min`
+    )
+    .join("\n");
+
+  const channelList = channels
+    .map((channel: any) => `- ${channel.title} | ${channel.subscriber_count ?? "n/a"} subs`)
+    .join("\n");
+
+  const topVideoList = (topVideos?.items || [])
+    .slice(0, 8)
+    .map((item: any) => `- ${item.title} | ${item.views ?? "n/a"} views`)
+    .join("\n");
+
+  const topicText = topicsSummary
+    ? JSON.stringify(topicsSummary)
+    : "No hay mapa de temas aún. Deduce pilares a partir de los títulos de mercado.";
+
+  return `Eres estratega de crecimiento en YouTube en español para un canal de IA aplicada al desarrollo de software.
+Objetivo: autoridad técnica (no influencer), con foco en metodología, casos reales y productividad en equipos.
+
+Condiciones del canal:
+- Tiempo disponible: ${payload.maxWeeklyHours} horas por semana
+- Cadencia deseada: 1 video/semana, pero puedes recomendar 2/mes si la complejidad lo exige.
+- Duración objetivo: videos largos (15-30 min) basados en tendencia del mercado.
+- CTA: usar lead magnet "${LEAD_MAGNET}" en 2 videos, 1 video con CTA suave (newsletter/lista espera), 1 video con CTA directo a la formación.
+
+Datos del mercado:
+- Query: ${run.query}
+- Videos analizados: ${stats?.videos ?? "n/a"}
+- Vistas promedio: ${stats?.avg_views ?? "n/a"}
+- Duración promedio (min): ${Math.round((stats?.avg_duration ?? 0) / 60)}
+- Duración p50/p75 (min): ${durationStats?.p50 ?? "n/a"} / ${durationStats?.p75 ?? "n/a"}
+- Canales relevantes:
+${channelList}
+
+Muestra de videos top del mercado:
+${marketSample}
+
+Score de autoridad (benchmarks):
+- Avg video score: ${authority?.benchmarks?.avgVideoScore ?? "n/a"}
+- Top video score: ${authority?.benchmarks?.topVideoScore ?? "n/a"}
+
+Analytics del canal (ultimos 28 dias):
+${analytics ? JSON.stringify(analytics.metrics) : "No disponible"}
+
+Top videos del canal (90 dias):
+${topVideoList || "No disponible"}
+
+Enfoque IA aplicada (sobre top videos del canal):
+${focusRatio ? `${focusRatio.aiCount}/${focusRatio.total} (${Math.round(focusRatio.ratio * 100)}%)` : "No disponible"}
+
+Mapa de temas (si existe):
+${topicText}
+
+Devuelve SOLO JSON valido con esta estructura exacta:
+{
+  "objetivo_mes": "...",
+  "cadencia_recomendada": "4 videos/mes" o "2 videos/mes",
+  "motivo_cadencia": "...",
+  "duracion_recomendada": "...",
+  "videos": [
+    {
+      "semana": "Semana 1",
+      "titulo": "...",
+      "angulo": "...",
+      "estructura": ["...","...","..."],
+      "duracion": "...",
+      "esfuerzo": "bajo|medio|alto",
+      "horas_estimadas": 6,
+      "cta": "...",
+      "razon": "..."
+    }
+  ],
+  "metricas_clave": ["...","..."]
+}
+
+Reglas:
+- No excedas ${payload.maxWeeklyHours} horas por semana.
+- Si recomiendas 2 videos/mes, asigna Semana 1 y Semana 3.
+- Duración recomendada basada en p50/p75 del mercado.
+- Cada video debe ser accionable y viable de preparar en el tiempo indicado.
+- Prioriza autoridad técnica sobre viralidad.`;
+}
+
 async function safeAnalyticsSummary() {
   try {
     return await fetchAnalyticsSummary(true);
@@ -755,6 +991,20 @@ function computeFocusRatio(items: any[]) {
     aiCount,
     total: items.length,
     ratio: aiCount / items.length,
+  };
+}
+
+function buildDurationStats(values: number[]) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const average = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
+  const pick = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+  const p50 = pick(0.5);
+  const p75 = pick(0.75);
+  return {
+    avg: Math.round(average / 60),
+    p50: Math.round(p50 / 60),
+    p75: Math.round(p75 / 60),
   };
 }
 
