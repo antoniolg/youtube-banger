@@ -1,0 +1,6 @@
+.env
+apps/backend/client_secrets.json
+apps/backend/node_modules
+apps/web/node_modules
+apps/backend/dist
+apps/web/dist
