@@ -117,6 +117,15 @@ export default function App() {
   const [globalLoading, setGlobalLoading] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [globalUpdatedAt, setGlobalUpdatedAt] = useState<string | null>(null);
+  const [videoDetailOpen, setVideoDetailOpen] = useState(false);
+  const [videoDetailIndex, setVideoDetailIndex] = useState<number | null>(null);
+  const [videoDetailLoading, setVideoDetailLoading] = useState(false);
+  const [videoDetailError, setVideoDetailError] = useState<string | null>(null);
+  const [videoDetail, setVideoDetail] = useState<any>(null);
+  const [videoNotes, setVideoNotes] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
   const [insightsRefreshing, setInsightsRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
   const [topVideos, setTopVideos] = useState<any>(null);
@@ -241,6 +250,101 @@ export default function App() {
       setGlobalInspiration(null);
     } finally {
       setGlobalLoading(false);
+    }
+  }
+
+  async function openVideoDetail(index: number) {
+    if (!activeRun?.run?.id || !monthPlanUpdatedAt) {
+      setVideoDetailError("Regenera el plan para abrir el detalle.");
+      setVideoDetailOpen(true);
+      return;
+    }
+    setVideoDetailOpen(true);
+    setVideoDetailIndex(index);
+    setVideoDetailLoading(true);
+    setVideoDetailError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/plan/month/video?runId=${activeRun.run.id}&index=${index}&planUpdatedAt=${encodeURIComponent(
+          monthPlanUpdatedAt
+        )}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo cargar el detalle.");
+      }
+      setVideoDetail(data);
+      setVideoNotes(data.notes || "");
+    } catch (err: any) {
+      setVideoDetailError(err.message);
+      setVideoDetail(null);
+    } finally {
+      setVideoDetailLoading(false);
+    }
+  }
+
+  function closeVideoDetail() {
+    setVideoDetailOpen(false);
+    setVideoDetailIndex(null);
+    setVideoDetail(null);
+    setVideoDetailError(null);
+    setChatInput("");
+  }
+
+  async function saveVideoNotes() {
+    if (!activeRun?.run?.id || videoDetailIndex === null || !monthPlanUpdatedAt) return;
+    setNotesSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/plan/month/video/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: activeRun.run.id,
+          index: videoDetailIndex,
+          planUpdatedAt: monthPlanUpdatedAt,
+          notes: videoNotes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudieron guardar las notas.");
+    } catch (err: any) {
+      setVideoDetailError(err.message);
+    } finally {
+      setNotesSaving(false);
+    }
+  }
+
+  async function sendChatMessage() {
+    if (!activeRun?.run?.id || videoDetailIndex === null || !monthPlanUpdatedAt || !chatInput.trim()) return;
+    const message = chatInput.trim();
+    setChatSending(true);
+    setChatInput("");
+    const nextMessages = [
+      ...(Array.isArray(videoDetail?.messages) ? videoDetail.messages : []),
+      { role: "user", content: message },
+    ];
+    setVideoDetail((prev: any) => ({ ...prev, messages: nextMessages }));
+    try {
+      const res = await fetch(`${API_BASE}/api/plan/month/video/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: activeRun.run.id,
+          index: videoDetailIndex,
+          planUpdatedAt: monthPlanUpdatedAt,
+          message,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo generar respuesta.");
+      setVideoDetail((prev: any) => ({
+        ...prev,
+        messages: [...nextMessages, { role: "assistant", content: data.reply }],
+      }));
+    } catch (err: any) {
+      setVideoDetailError(err.message);
+    } finally {
+      setChatSending(false);
     }
   }
 
@@ -456,6 +560,13 @@ export default function App() {
                   <div className="plan-card__header">
                     <span className="action-pill">{video.semana || `Semana ${index + 1}`}</span>
                     <span className="pill">{video.esfuerzo || "medio"}</span>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => openVideoDetail(index)}
+                    >
+                      Detalle
+                    </button>
                   </div>
                   <h3>{video.titulo}</h3>
                   <p className="muted">{video.angulo}</p>
@@ -1029,6 +1140,93 @@ export default function App() {
           )}
         </section>
       </main>
+      {videoDetailOpen ? (
+        <div className="detail-overlay" onClick={closeVideoDetail}>
+          <div className="detail-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="detail-header">
+              <div>
+                <p className="detail-label">Detalle de vídeo</p>
+                <h3>{videoDetail?.video?.titulo || "Video del mes"}</h3>
+              </div>
+              <button className="ghost-button" onClick={closeVideoDetail}>
+                Cerrar
+              </button>
+            </div>
+            {videoDetailError ? <div className="error">{videoDetailError}</div> : null}
+            {videoDetailLoading ? (
+              <p className="muted">Cargando detalle...</p>
+            ) : videoDetail ? (
+              <div className="detail-body">
+                <div className="detail-block">
+                  <h4>Contexto</h4>
+                  <p className="muted">{videoDetail.video?.angulo}</p>
+                  <div className="detail-meta">
+                    <span>Duración: {videoDetail.video?.duracion || "n/a"}</span>
+                    <span>Esfuerzo: {videoDetail.video?.esfuerzo || "n/a"}</span>
+                    <span>Horas: {videoDetail.video?.horas_estimadas ?? "n/a"}h</span>
+                  </div>
+                  <p className="muted">CTA: {videoDetail.video?.cta}</p>
+                  <p className="muted">Razón: {videoDetail.video?.razon}</p>
+                  <h4>Estructura base</h4>
+                  <ul>
+                    {asList(videoDetail.video?.estructura).map((item, i) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="detail-block">
+                  <div className="detail-header-row">
+                    <h4>Notas</h4>
+                    <button
+                      className={`action-button ${notesSaving ? "is-loading" : ""}`}
+                      onClick={saveVideoNotes}
+                      disabled={notesSaving}
+                    >
+                      {notesSaving ? "Guardando..." : "Guardar notas"}
+                    </button>
+                  </div>
+                  <textarea
+                    className="notes-area"
+                    rows={6}
+                    value={videoNotes}
+                    onChange={(event) => setVideoNotes(event.target.value)}
+                    placeholder="Apunta ideas, ejemplos, recursos o puntos clave..."
+                  />
+                </div>
+
+                <div className="detail-block">
+                  <h4>Chat de guion</h4>
+                  <div className="chat">
+                    {(videoDetail.messages || []).map((msg: any, index: number) => (
+                      <div key={index} className={`chat-message ${msg.role === "user" ? "user" : "assistant"}`}>
+                        <p>{msg.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="chat-input">
+                    <textarea
+                      rows={3}
+                      value={chatInput}
+                      onChange={(event) => setChatInput(event.target.value)}
+                      placeholder="Pide el guion, mejora el hook, estructura, etc."
+                    />
+                    <button
+                      className={`action-button ${chatSending ? "is-loading" : ""}`}
+                      onClick={sendChatMessage}
+                      disabled={chatSending}
+                    >
+                      {chatSending ? "Enviando..." : "Enviar"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="muted">Selecciona un vídeo del plan para abrir el detalle.</p>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
   async function fetchInsights(runId: number, refresh = false) {

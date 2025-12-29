@@ -34,6 +34,29 @@ export async function generateInsights(prompt: string, schema?: Record<string, a
   return parseGeminiJson(text) ?? { raw: text };
 }
 
+export async function generateText(prompt: string) {
+  const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+  const url = `${GEMINI_BASE}/models/${model}:generateContent?key=${getApiKey()}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.4 },
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${text}`);
+  }
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error("Gemini API returned empty content");
+  }
+  return text;
+}
+
 export function normalizeGeminiInsight(value: any) {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") {

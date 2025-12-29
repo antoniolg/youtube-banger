@@ -65,6 +65,25 @@ CREATE TABLE IF NOT EXISTS insights_cache (
   PRIMARY KEY (run_id, type)
 );
 
+CREATE TABLE IF NOT EXISTS video_ideation_notes (
+  run_id INT NOT NULL REFERENCES search_runs(id) ON DELETE CASCADE,
+  plan_updated_at TIMESTAMPTZ NOT NULL,
+  video_index INT NOT NULL,
+  notes TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (run_id, plan_updated_at, video_index)
+);
+
+CREATE TABLE IF NOT EXISTS video_ideation_messages (
+  id SERIAL PRIMARY KEY,
+  run_id INT NOT NULL REFERENCES search_runs(id) ON DELETE CASCADE,
+  plan_updated_at TIMESTAMPTZ NOT NULL,
+  video_index INT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS oauth_tokens (
   provider TEXT PRIMARY KEY,
   access_token TEXT,

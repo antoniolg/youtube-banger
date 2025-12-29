@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import { pool, migrate } from "./db.js";
 import { searchVideos, fetchVideoDetails, fetchChannelDetails } from "./youtube.js";
-import { generateInsights, normalizeGeminiInsight } from "./gemini.js";
+import { generateInsights, generateText, normalizeGeminiInsight } from "./gemini.js";
 import { DEFAULT_SCOPES, exchangeCodeForTokens, getAuthUrl, getAuthorizedClient } from "./oauth.js";
 import { google } from "googleapis";
 import { computeAuthority } from "./analysis.js";
@@ -564,6 +564,114 @@ app.get("/api/inspiration/global", async (req, res) => {
   }
 });
 
+app.get("/api/plan/month/video", async (req, res) => {
+  try {
+    const runId = Number(req.query.runId);
+    const videoIndex = Number(req.query.index);
+    const planUpdatedAt = String(req.query.planUpdatedAt || "");
+    if (!runId || Number.isNaN(videoIndex)) {
+      return res.status(400).json({ error: "runId and index are required" });
+    }
+
+    const planData = await loadMonthPlanVideo(runId, videoIndex, planUpdatedAt);
+    const notesResult = await pool.query(
+      `SELECT notes FROM video_ideation_notes
+       WHERE run_id = $1 AND plan_updated_at = $2 AND video_index = $3`,
+      [runId, planData.planUpdatedAt, videoIndex]
+    );
+    const messagesResult = await pool.query(
+      `SELECT role, content, created_at
+       FROM video_ideation_messages
+       WHERE run_id = $1 AND plan_updated_at = $2 AND video_index = $3
+       ORDER BY id ASC`,
+      [runId, planData.planUpdatedAt, videoIndex]
+    );
+
+    res.json({
+      planUpdatedAt: planData.planUpdatedAt,
+      video: planData.video,
+      notes: notesResult.rows[0]?.notes || "",
+      messages: messagesResult.rows || [],
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.post("/api/plan/month/video/notes", async (req, res) => {
+  try {
+    const runId = Number(req.body.runId);
+    const videoIndex = Number(req.body.index);
+    const planUpdatedAt = String(req.body.planUpdatedAt || "");
+    const notes = String(req.body.notes || "");
+    if (!runId || Number.isNaN(videoIndex) || !planUpdatedAt) {
+      return res.status(400).json({ error: "runId, index and planUpdatedAt are required" });
+    }
+
+    const planData = await loadMonthPlanVideo(runId, videoIndex, planUpdatedAt);
+    const result = await pool.query(
+      `INSERT INTO video_ideation_notes (run_id, plan_updated_at, video_index, notes, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (run_id, plan_updated_at, video_index)
+       DO UPDATE SET notes = EXCLUDED.notes, updated_at = NOW()
+       RETURNING notes, updated_at`,
+      [runId, planData.planUpdatedAt, videoIndex, notes]
+    );
+    res.json({ notes: result.rows[0]?.notes || notes, updatedAt: result.rows[0]?.updated_at });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.post("/api/plan/month/video/chat", async (req, res) => {
+  try {
+    const runId = Number(req.body.runId);
+    const videoIndex = Number(req.body.index);
+    const planUpdatedAt = String(req.body.planUpdatedAt || "");
+    const message = String(req.body.message || "").trim();
+    if (!runId || Number.isNaN(videoIndex) || !planUpdatedAt || !message) {
+      return res.status(400).json({ error: "runId, index, planUpdatedAt and message are required" });
+    }
+
+    const planData = await loadMonthPlanVideo(runId, videoIndex, planUpdatedAt);
+    await pool.query(
+      `INSERT INTO video_ideation_messages (run_id, plan_updated_at, video_index, role, content)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [runId, planData.planUpdatedAt, videoIndex, "user", message]
+    );
+
+    const notesResult = await pool.query(
+      `SELECT notes FROM video_ideation_notes
+       WHERE run_id = $1 AND plan_updated_at = $2 AND video_index = $3`,
+      [runId, planData.planUpdatedAt, videoIndex]
+    );
+    const notes = notesResult.rows[0]?.notes || "";
+
+    const messagesResult = await pool.query(
+      `SELECT role, content
+       FROM video_ideation_messages
+       WHERE run_id = $1 AND plan_updated_at = $2 AND video_index = $3
+       ORDER BY id DESC
+       LIMIT 10`,
+      [runId, planData.planUpdatedAt, videoIndex]
+    );
+    const history = messagesResult.rows.reverse();
+
+    const prompt = buildVideoChatPrompt(planData.video, notes, history);
+    const reply = await generateText(prompt);
+
+    await pool.query(
+      `INSERT INTO video_ideation_messages (run_id, plan_updated_at, video_index, role, content)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [runId, planData.planUpdatedAt, videoIndex, "assistant", reply]
+    );
+
+    res.json({ reply });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
 app.get("/api/analysis/authority", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
@@ -985,6 +1093,57 @@ Muestra:
 ${list}
 
 Reglas: ideas importables al mercado hispano, tono autoridad técnica, evita clickbait.`;
+}
+
+async function loadMonthPlanVideo(runId: number, videoIndex: number, planUpdatedAt: string) {
+  const cached = await getCachedInsight(runId, "month-plan");
+  if (!cached) {
+    throw new Error("Plan del mes no encontrado. Regenera el plan.");
+  }
+  if (planUpdatedAt) {
+    const cachedTime = new Date(cached.updatedAt).getTime();
+    const requestedTime = new Date(planUpdatedAt).getTime();
+    if (!Number.isNaN(requestedTime) && Math.abs(cachedTime - requestedTime) > 1000) {
+      throw new Error("El plan del mes cambió. Regenera el plan para continuar.");
+    }
+  }
+  const plan = normalizeGeminiInsight(cached.content);
+  const videos = Array.isArray(plan?.videos) ? plan.videos : [];
+  const video = videos[videoIndex];
+  if (!video) {
+    throw new Error("Video no encontrado en el plan.");
+  }
+  return { plan, video, planUpdatedAt: cached.updatedAt };
+}
+
+function buildVideoChatPrompt(video: any, notes: string, messages: Array<{ role: string; content: string }>) {
+  const history = messages
+    .map((item) => `${item.role === "user" ? "Usuario" : "Asistente"}: ${item.content}`)
+    .join("\n");
+
+  return `Eres productor y guionista de YouTube en español.
+Canal: IA aplicada al desarrollo de software. Objetivo: autoridad técnica (no influencer).
+
+Detalles del video:
+- Título: ${video.titulo}
+- Ángulo: ${video.angulo}
+- Duración: ${video.duracion}
+- Esfuerzo: ${video.esfuerzo} (${video.horas_estimadas ?? "n/a"}h)
+- CTA: ${video.cta}
+- Razón estratégica: ${video.razon}
+- Estructura base: ${Array.isArray(video.estructura) ? video.estructura.join(" | ") : video.estructura}
+
+Notas del creador:
+${notes || "Sin notas aún."}
+
+Conversación reciente:
+${history || "Sin historial."}
+
+Instrucciones:
+- Responde en español, conciso y accionable.
+- Si piden guion, entrega estructura por secciones con bullets.
+- Si detectas huecos, pregunta una sola cosa clave para avanzar.
+- Evita tono hype o influencer.`;
 }
 
 async function safeAnalyticsSummary() {
