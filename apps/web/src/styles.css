@@ -174,6 +174,33 @@ button:disabled {
   border: 1px solid rgba(31, 110, 122, 0.3);
 }
 
+.panel.summary {
+  border: 1px solid rgba(195, 84, 42, 0.2);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(243, 225, 210, 0.7));
+}
+
+.summary-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.summary-card {
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  border: 1px solid rgba(20, 17, 13, 0.08);
+}
+
+.alert-card {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-md);
+  background: rgba(195, 84, 42, 0.12);
+  border: 1px solid rgba(195, 84, 42, 0.3);
+  font-weight: 600;
+}
+
 .panel__header {
   display: flex;
   align-items: center;
@@ -507,6 +534,72 @@ button:disabled {
   margin-top: 1.6rem;
   display: grid;
   gap: 0.8rem;
+}
+
+.top-videos__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  font-family: "Syne", sans-serif;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink-soft);
+}
+
+.filters {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.filter {
+  background: rgba(31, 110, 122, 0.12);
+  border: 1px solid rgba(31, 110, 122, 0.2);
+  color: var(--aqua);
+  font-size: 0.85rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+.filter.active {
+  background: rgba(31, 110, 122, 0.25);
+  border-color: rgba(31, 110, 122, 0.45);
+}
+
+.filter:hover {
+  transform: none;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-family: "Syne", sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-left: 0.4rem;
+}
+
+.tag-ai {
+  background: rgba(31, 110, 122, 0.2);
+  color: var(--aqua);
+}
+
+.tag-dev {
+  background: rgba(195, 84, 42, 0.15);
+  color: var(--accent-dark);
 }
 
 .bold {

@@ -21,6 +21,33 @@ function asList(value: any) {
   return [String(value)];
 }
 
+function classifyVideo(title: string) {
+  const text = title.toLowerCase();
+  const aiKeywords = [
+    "ia",
+    "ai",
+    "inteligencia artificial",
+    "gpt",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "codex",
+    "cursor",
+    "agente",
+    "agent",
+    "multi-agente",
+    "prompt",
+    "llm",
+    "copilot",
+    "replit",
+    "vibe coding",
+  ];
+  for (const keyword of aiKeywords) {
+    if (text.includes(keyword)) return "IA aplicada";
+  }
+  return "Dev general";
+}
+
 type Run = {
   id: number;
   query: string;
@@ -50,6 +77,7 @@ export default function App() {
   const [topVideos, setTopVideos] = useState<any>(null);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [topVideosError, setTopVideosError] = useState<string | null>(null);
+  const [topFilter, setTopFilter] = useState<"all" | "ai" | "dev">("all");
   const [oauthRequired, setOauthRequired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +189,59 @@ export default function App() {
     return { avgViews, avgDuration };
   }, [activeRun]);
 
+  const topVideosEnriched = useMemo(() => {
+    if (!topVideos?.items) return [];
+    return topVideos.items.map((item: any) => ({
+      ...item,
+      category: classifyVideo(item.title || ""),
+    }));
+  }, [topVideos]);
+
+  const topVideosFiltered = useMemo(() => {
+    if (topFilter === "all") return topVideosEnriched;
+    return topVideosEnriched.filter((item: any) =>
+      topFilter === "ai" ? item.category === "IA aplicada" : item.category === "Dev general"
+    );
+  }, [topVideosEnriched, topFilter]);
+
+  const focusRatio = useMemo(() => {
+    if (!topVideosEnriched.length) return null;
+    const aiCount = topVideosEnriched.filter((item: any) => item.category === "IA aplicada").length;
+    const ratio = aiCount / topVideosEnriched.length;
+    return { aiCount, total: topVideosEnriched.length, ratio };
+  }, [topVideosEnriched]);
+
+  const summary = useMemo(() => {
+    const items: string[] = [];
+    if (analytics?.metrics) {
+      const views = Number(analytics.metrics.views || 0).toLocaleString("es-ES");
+      const minutes = Number(analytics.metrics.estimatedMinutesWatched || 0).toLocaleString("es-ES");
+      const netSubs =
+        Number(analytics.metrics.subscribersGained || 0) - Number(analytics.metrics.subscribersLost || 0);
+      items.push(`Tracción reciente: ${views} vistas · ${minutes} min vistos · ${netSubs} subs netos`);
+    }
+    if (focusRatio) {
+      const percent = Math.round(focusRatio.ratio * 100);
+      items.push(`Enfoque IA aplicada: ${focusRatio.aiCount}/${focusRatio.total} top videos (${percent}%)`);
+    }
+    if (activeRun?.stats) {
+      const avgViews = Number(activeRun.stats.avg_views || 0).toFixed(0);
+      const avgMinutes = Math.round(Number(activeRun.stats.avg_duration || 0) / 60);
+      items.push(
+        `Mercado: ${activeRun.stats.videos} videos · ${avgMinutes} min promedio · ${avgViews} vistas promedio`
+      );
+    }
+    return items;
+  }, [analytics, focusRatio, activeRun]);
+
+  const alert = useMemo(() => {
+    if (!focusRatio) return null;
+    if (focusRatio.ratio < 0.5) {
+      return "Alerta: el contenido con más tracción no está centrado en IA aplicada al software.";
+    }
+    return null;
+  }, [focusRatio]);
+
   return (
     <div className="app">
       <header className="hero">
@@ -201,6 +282,25 @@ export default function App() {
       </header>
 
       <main className="layout">
+        <section className="panel summary">
+          <div className="panel__header">
+            <h2>Resumen ejecutivo</h2>
+            <span>Contexto actual</span>
+          </div>
+          {summary.length ? (
+            <div className="summary-grid">
+              {summary.map((item, index) => (
+                <div key={index} className="summary-card">
+                  <p>{item}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">Conecta Analytics y ejecuta una investigación para ver el resumen.</p>
+          )}
+          {alert ? <div className="alert-card">{alert}</div> : null}
+        </section>
+
         <section className="panel">
           <div className="panel__header">
             <h2>Historial de exploraciones</h2>
@@ -444,9 +544,34 @@ export default function App() {
           {topVideosError ? <p className="muted">{topVideosError}</p> : null}
           {topVideos?.items?.length ? (
             <div className="top-videos">
-              <h3>Tus videos con más tracción</h3>
+              <div className="top-videos__header">
+                <h3>Tus videos con más tracción</h3>
+                <div className="filter-bar">
+                  <span>Filtrar</span>
+                  <div className="filters">
+                    <button
+                      className={`filter ${topFilter === "all" ? "active" : ""}`}
+                      onClick={() => setTopFilter("all")}
+                    >
+                      Todos
+                    </button>
+                    <button
+                      className={`filter ${topFilter === "ai" ? "active" : ""}`}
+                      onClick={() => setTopFilter("ai")}
+                    >
+                      IA aplicada
+                    </button>
+                    <button
+                      className={`filter ${topFilter === "dev" ? "active" : ""}`}
+                      onClick={() => setTopFilter("dev")}
+                    >
+                      Dev general
+                    </button>
+                  </div>
+                </div>
+              </div>
               <div className="videos">
-                {topVideos.items.map((item: any) => (
+                {topVideosFiltered.map((item: any) => (
                   <article key={item.videoId} className="video-row">
                     <a
                       className="link-reset"
@@ -472,7 +597,12 @@ export default function App() {
                       >
                         <h4>{item.title}</h4>
                       </a>
-                      <p>{Number(item.views || 0).toLocaleString("es-ES")} vistas (90 días)</p>
+                      <p>
+                        {Number(item.views || 0).toLocaleString("es-ES")} vistas (90 días) ·{" "}
+                        <span className={`tag ${item.category === "IA aplicada" ? "tag-ai" : "tag-dev"}`}>
+                          {item.category}
+                        </span>
+                      </p>
                     </div>
                     <span className="pill">{Math.round((item.averageViewDuration || 0) / 60)} min</span>
                   </article>
