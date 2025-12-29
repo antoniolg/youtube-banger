@@ -10,6 +10,7 @@ import { computeAuthority } from "./analysis.js";
 
 const app = express();
 const port = Number(process.env.PORT || 8080);
+const MIN_LONG_SECONDS = 150;
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json({ limit: "2mb" }));
@@ -187,12 +188,14 @@ app.get("/api/analytics/top-videos", async (_req, res) => {
 app.get("/api/runs", async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT sr.*, COUNT(srv.video_id) AS video_count
+      `SELECT sr.*, COUNT(v.id) AS video_count
        FROM search_runs sr
        LEFT JOIN search_run_videos srv ON sr.id = srv.run_id
+       LEFT JOIN videos v ON v.id = srv.video_id AND v.duration_seconds >= $1
        GROUP BY sr.id
        ORDER BY sr.created_at DESC
-       LIMIT 20`
+       LIMIT 20`,
+      [MIN_LONG_SECONDS]
     );
     res.json({ runs: result.rows });
   } catch (error: any) {
@@ -214,9 +217,10 @@ app.get("/api/runs/:id", async (req, res) => {
        JOIN videos v ON v.id = srv.video_id
        JOIN channels c ON c.id = v.channel_id
        WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
        ORDER BY v.view_count DESC NULLS LAST
        LIMIT 30`,
-      [runId]
+      [runId, MIN_LONG_SECONDS]
     );
 
     const channelsResult = await pool.query(
@@ -228,18 +232,20 @@ app.get("/api/runs/:id", async (req, res) => {
        JOIN videos v ON v.id = srv.video_id
        JOIN channels c ON c.id = v.channel_id
        WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
        GROUP BY v.channel_id, c.title, c.thumbnail_url, c.subscriber_count
        ORDER BY total_views DESC NULLS LAST
        LIMIT 12`,
-      [runId]
+      [runId, MIN_LONG_SECONDS]
     );
 
     const statsResult = await pool.query(
       `SELECT COUNT(*)::int AS videos, AVG(view_count)::float8 AS avg_views, AVG(duration_seconds)::float8 AS avg_duration
        FROM search_run_videos srv
        JOIN videos v ON v.id = srv.video_id
-       WHERE srv.run_id = $1`,
-      [runId]
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2`,
+      [runId, MIN_LONG_SECONDS]
     );
 
     res.json({
@@ -276,9 +282,10 @@ app.get("/api/insights/overview", async (req, res) => {
        JOIN videos v ON v.id = srv.video_id
        JOIN channels c ON c.id = v.channel_id
        WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
        ORDER BY v.view_count DESC NULLS LAST
        LIMIT 18`,
-      [runId]
+      [runId, MIN_LONG_SECONDS]
     );
 
     const prompt = buildInsightsPrompt(videosResult.rows);
@@ -314,9 +321,10 @@ app.get("/api/insights/topics", async (req, res) => {
        JOIN videos v ON v.id = srv.video_id
        JOIN channels c ON c.id = v.channel_id
        WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
        ORDER BY v.view_count DESC NULLS LAST
        LIMIT 40`,
-      [runId]
+      [runId, MIN_LONG_SECONDS]
     );
 
     const prompt = buildTopicsPrompt(videosResult.rows);
@@ -356,9 +364,10 @@ app.get("/api/insights/next-actions", async (req, res) => {
        JOIN videos v ON v.id = srv.video_id
        JOIN channels c ON c.id = v.channel_id
        WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
        ORDER BY v.view_count DESC NULLS LAST
        LIMIT 30`,
-      [runId]
+      [runId, MIN_LONG_SECONDS]
     );
 
     const channelsResult = await pool.query(
@@ -367,18 +376,20 @@ app.get("/api/insights/next-actions", async (req, res) => {
        JOIN videos v ON v.id = srv.video_id
        JOIN channels c ON c.id = v.channel_id
        WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
        GROUP BY v.channel_id, c.title, c.subscriber_count
        ORDER BY c.subscriber_count DESC NULLS LAST
        LIMIT 8`,
-      [runId]
+      [runId, MIN_LONG_SECONDS]
     );
 
     const statsResult = await pool.query(
       `SELECT COUNT(*)::int AS videos, AVG(view_count)::float8 AS avg_views, AVG(duration_seconds)::float8 AS avg_duration
        FROM search_run_videos srv
        JOIN videos v ON v.id = srv.video_id
-       WHERE srv.run_id = $1`,
-      [runId]
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2`,
+      [runId, MIN_LONG_SECONDS]
     );
 
     const authority = computeAuthority(videosResult.rows);
@@ -418,8 +429,9 @@ app.get("/api/analysis/authority", async (req, res) => {
        FROM search_run_videos srv
        JOIN videos v ON v.id = srv.video_id
        JOIN channels c ON c.id = v.channel_id
-       WHERE srv.run_id = $1`,
-      [runId]
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2`,
+      [runId, MIN_LONG_SECONDS]
     );
 
     const authority = computeAuthority(videosResult.rows);
@@ -639,28 +651,14 @@ const NEXT_ACTIONS_SCHEMA = {
 
 async function safeAnalyticsSummary() {
   try {
-    const auth = await getAuthorizedClient();
-    const analytics = google.youtubeAnalytics({ version: "v2", auth });
-    const { startDate, endDate } = getLastDaysRange(28);
-    const response = await analytics.reports.query({
-      ids: "channel==MINE",
-      startDate,
-      endDate,
-      metrics: "views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost",
-    });
-    const rows = response.data.rows?.[0] || [];
-    return {
-      range: { startDate, endDate },
-      metrics: {
-        views: rows[0] ?? 0,
-        estimatedMinutesWatched: rows[1] ?? 0,
-        averageViewDuration: rows[2] ?? 0,
-        subscribersGained: rows[3] ?? 0,
-        subscribersLost: rows[4] ?? 0,
-      },
-    };
+    return await fetchAnalyticsSummary(true);
   } catch {
-    return null;
+    try {
+      const fallback = await fetchAnalyticsSummary(false);
+      return { ...fallback, includesShorts: true };
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -683,20 +681,49 @@ async function safeAnalyticsTopVideos() {
     const videoIds = rows.map((row) => row[0]);
     const details = await fetchVideoDetails(videoIds);
     const detailMap = new Map(details.map((item) => [item.id, item]));
-    const items = rows.map((row) => {
-      const [videoId, views, minutes, avgDuration] = row;
-      const detail = detailMap.get(videoId);
-      return {
-        videoId,
-        title: detail?.title || "Video",
-        views,
-        averageViewDuration: avgDuration,
-      };
-    });
+    const items = rows
+      .map((row) => {
+        const [videoId, views, _minutes, avgDuration] = row;
+        const detail = detailMap.get(videoId);
+        return {
+          videoId,
+          title: detail?.title || "Video",
+          views,
+          averageViewDuration: avgDuration,
+          durationSeconds: detail?.durationSeconds ?? null,
+        };
+      })
+      .filter((item) => (item.durationSeconds ?? 0) >= MIN_LONG_SECONDS)
+      .map(({ durationSeconds, ...rest }) => rest);
     return { range: { startDate, endDate }, items };
   } catch {
     return null;
   }
+}
+
+async function fetchAnalyticsSummary(filterLong: boolean) {
+  const auth = await getAuthorizedClient();
+  const analytics = google.youtubeAnalytics({ version: "v2", auth });
+  const { startDate, endDate } = getLastDaysRange(28);
+  const response = await analytics.reports.query({
+    ids: "channel==MINE",
+    startDate,
+    endDate,
+    metrics: "views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost",
+    ...(filterLong ? { filters: "videoDurationType==LONG" } : {}),
+  });
+  const rows = response.data.rows?.[0] || [];
+  return {
+    range: { startDate, endDate },
+    metrics: {
+      views: rows[0] ?? 0,
+      estimatedMinutesWatched: rows[1] ?? 0,
+      averageViewDuration: rows[2] ?? 0,
+      subscribersGained: rows[3] ?? 0,
+      subscribersLost: rows[4] ?? 0,
+    },
+    includesShorts: false,
+  };
 }
 
 function computeFocusRatio(items: any[]) {

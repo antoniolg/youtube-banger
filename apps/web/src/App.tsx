@@ -278,7 +278,8 @@ export default function App() {
       const minutes = Number(analytics.metrics.estimatedMinutesWatched || 0).toLocaleString("es-ES");
       const netSubs =
         Number(analytics.metrics.subscribersGained || 0) - Number(analytics.metrics.subscribersLost || 0);
-      items.push(`Tracción reciente: ${views} vistas · ${minutes} min vistos · ${netSubs} subs netos`);
+      const suffix = analytics.includesShorts ? " (incluye shorts)" : "";
+      items.push(`Tracción reciente${suffix}: ${views} vistas · ${minutes} min vistos · ${netSubs} subs netos`);
     }
     if (focusRatio) {
       const percent = Math.round(focusRatio.ratio * 100);
@@ -734,28 +735,35 @@ export default function App() {
               <p>{analyticsError}</p>
             </div>
           ) : analytics ? (
-            <div className="analytics-grid">
-              <div className="stat">
-                <p>Vistas</p>
-                <h3>{Number(analytics.metrics?.views || 0).toLocaleString("es-ES")}</h3>
+            <>
+              {analytics.includesShorts ? (
+                <p className="muted">
+                  Nota: estas métricas incluyen shorts porque la API no permite filtrarlos aquí.
+                </p>
+              ) : null}
+              <div className="analytics-grid">
+                <div className="stat">
+                  <p>Vistas</p>
+                  <h3>{Number(analytics.metrics?.views || 0).toLocaleString("es-ES")}</h3>
+                </div>
+                <div className="stat">
+                  <p>Minutos vistos</p>
+                  <h3>{Number(analytics.metrics?.estimatedMinutesWatched || 0).toLocaleString("es-ES")}</h3>
+                </div>
+                <div className="stat">
+                  <p>Duración media (s)</p>
+                  <h3>{Number(analytics.metrics?.averageViewDuration || 0).toFixed(0)}</h3>
+                </div>
+                <div className="stat">
+                  <p>Subs ganados</p>
+                  <h3>{Number(analytics.metrics?.subscribersGained || 0).toLocaleString("es-ES")}</h3>
+                </div>
+                <div className="stat">
+                  <p>Subs perdidos</p>
+                  <h3>{Number(analytics.metrics?.subscribersLost || 0).toLocaleString("es-ES")}</h3>
+                </div>
               </div>
-              <div className="stat">
-                <p>Minutos vistos</p>
-                <h3>{Number(analytics.metrics?.estimatedMinutesWatched || 0).toLocaleString("es-ES")}</h3>
-              </div>
-              <div className="stat">
-                <p>Duración media (s)</p>
-                <h3>{Number(analytics.metrics?.averageViewDuration || 0).toFixed(0)}</h3>
-              </div>
-              <div className="stat">
-                <p>Subs ganados</p>
-                <h3>{Number(analytics.metrics?.subscribersGained || 0).toLocaleString("es-ES")}</h3>
-              </div>
-              <div className="stat">
-                <p>Subs perdidos</p>
-                <h3>{Number(analytics.metrics?.subscribersLost || 0).toLocaleString("es-ES")}</h3>
-              </div>
-            </div>
+            </>
           ) : (
             <p className="muted">Cargando métricas...</p>
           )}
