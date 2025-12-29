@@ -64,6 +64,16 @@ function formatAge(value: string) {
   return `hace ${hours}h`;
 }
 
+function formatElapsed(start: number | null) {
+  if (!start) return "0s";
+  const diffMs = Math.max(0, Date.now() - start);
+  const totalSeconds = Math.floor(diffMs / 1000);
+  if (totalSeconds < 60) return `${Math.max(1, totalSeconds)}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
 type Run = {
   id: number;
   query: string;
@@ -89,10 +99,20 @@ export default function App() {
   const [insights, setInsights] = useState<any>(null);
   const [topics, setTopics] = useState<any>(null);
   const [authority, setAuthority] = useState<any>(null);
+  const [topicsLoading, setTopicsLoading] = useState(false);
+  const [authorityLoading, setAuthorityLoading] = useState(false);
+  const [topicsError, setTopicsError] = useState<string | null>(null);
+  const [authorityError, setAuthorityError] = useState<string | null>(null);
+  const [topicsStartedAt, setTopicsStartedAt] = useState<number | null>(null);
+  const [authorityStartedAt, setAuthorityStartedAt] = useState<number | null>(null);
+  const [, setLoadingTick] = useState(0);
+  const [overviewUpdatedAt, setOverviewUpdatedAt] = useState<string | null>(null);
+  const [topicsUpdatedAt, setTopicsUpdatedAt] = useState<string | null>(null);
   const [nextActions, setNextActions] = useState<any>(null);
   const [nextActionsError, setNextActionsError] = useState<string | null>(null);
   const [nextActionsLoading, setNextActionsLoading] = useState(false);
   const [nextActionsUpdatedAt, setNextActionsUpdatedAt] = useState<string | null>(null);
+  const [insightsRefreshing, setInsightsRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
   const [topVideos, setTopVideos] = useState<any>(null);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
@@ -113,6 +133,14 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!topicsLoading && !authorityLoading) return;
+    const id = window.setInterval(() => {
+      setLoadingTick((tick) => tick + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [topicsLoading, authorityLoading]);
+
   async function fetchRuns() {
     const res = await fetch(`${API_BASE}/api/runs`);
     const data = await res.json();
@@ -131,21 +159,7 @@ export default function App() {
     }
     const data = await res.json();
     setActiveRun(data);
-    const [insightsRes, topicsRes, authorityRes] = await Promise.all([
-      fetch(`${API_BASE}/api/insights/overview?runId=${runId}`),
-      fetch(`${API_BASE}/api/insights/topics?runId=${runId}`),
-      fetch(`${API_BASE}/api/analysis/authority?runId=${runId}`),
-    ]);
-
-    const insightsData = await insightsRes.json();
-    setInsights(insightsData.insights || null);
-
-    const topicsData = await topicsRes.json();
-    setTopics(topicsData.insights || null);
-
-    const authorityData = await authorityRes.json();
-    setAuthority(authorityData || null);
-
+    await fetchInsights(runId);
     fetchNextActions(runId);
   }
 
@@ -232,6 +246,9 @@ export default function App() {
     return { avgViews, avgDuration };
   }, [activeRun]);
 
+  const authorityElapsed = formatElapsed(authorityStartedAt);
+  const topicsElapsed = formatElapsed(topicsStartedAt);
+
   const topVideosEnriched = useMemo(() => {
     if (!topVideos?.items) return [];
     return topVideos.items.map((item: any) => ({
@@ -285,6 +302,20 @@ export default function App() {
     return null;
   }, [focusRatio]);
 
+  const insightEntries = useMemo(() => {
+    if (!insights) return [];
+    return Object.entries(insights).filter(([key]) => !key.startsWith("_"));
+  }, [insights]);
+
+  const lastInsightUpdate = useMemo(() => {
+    const dates = [overviewUpdatedAt, topicsUpdatedAt, nextActionsUpdatedAt]
+      .filter(Boolean)
+      .map((value) => new Date(value as string).getTime())
+      .filter((value) => Number.isFinite(value));
+    if (!dates.length) return null;
+    return new Date(Math.max(...dates)).toISOString();
+  }, [overviewUpdatedAt, topicsUpdatedAt, nextActionsUpdatedAt]);
+
   return (
     <div className="app">
       <header className="hero">
@@ -328,7 +359,19 @@ export default function App() {
         <section className="panel summary">
           <div className="panel__header">
             <h2>Resumen ejecutivo</h2>
-            <span>Contexto actual</span>
+            <div className="actions-meta">
+              <span className="muted">
+                {lastInsightUpdate ? `Actualizado ${formatAge(lastInsightUpdate)}` : "Sin datos"}
+              </span>
+              <button
+                className={`action-button ${insightsRefreshing ? "is-loading" : ""}`}
+                onClick={refreshAllInsights}
+                disabled={insightsRefreshing}
+                aria-busy={insightsRefreshing}
+              >
+                {insightsRefreshing ? "Refrescando todo..." : "Refrescar todo"}
+              </button>
+            </div>
           </div>
           {summary.length ? (
             <div className="summary-grid">
@@ -352,11 +395,12 @@ export default function App() {
                 {nextActionsUpdatedAt ? `Actualizado ${formatAge(nextActionsUpdatedAt)}` : "Sin datos"}
               </span>
               <button
-                className="action-button"
+                className={`action-button ${nextActionsLoading ? "is-loading" : ""}`}
                 onClick={() => activeRun?.run?.id && fetchNextActions(activeRun.run.id, true)}
                 disabled={nextActionsLoading}
+                aria-busy={nextActionsLoading}
               >
-                {nextActionsLoading ? "Generando..." : "Regenerar"}
+                {nextActionsLoading ? "Regenerando..." : "Regenerar"}
               </button>
             </div>
           </div>
@@ -477,7 +521,7 @@ export default function App() {
             <h3>Señales de autoridad</h3>
             {insights ? (
               <div className="insights__grid">
-                {Object.entries(insights).map(([key, values]) => (
+                {insightEntries.map(([key, values]) => (
                   <div key={key} className="insight">
                     <h4>{key.replace(/_/g, " ")}</h4>
                     <ul>
@@ -499,7 +543,30 @@ export default function App() {
             <h2>Score de autoridad</h2>
             <span>Top señales</span>
           </div>
-          {authority ? (
+          {authorityLoading ? (
+            <div className="loading-card">
+              <div className="loading-row">
+                <span className="loading-spinner" aria-hidden="true" />
+                <div>
+                  <p className="loading-title">Calculando score de autoridad</p>
+                  <p className="muted">Tiempo transcurrido: {authorityElapsed}</p>
+                </div>
+              </div>
+              <div className="loading-bar" />
+              <div className="loading-steps">
+                <span className="loading-pill">Extrayendo señales</span>
+                <span className="loading-pill">Normalizando scores</span>
+                <span className="loading-pill">Ordenando top</span>
+              </div>
+              <p className="loading-hint">
+                Esto puede tardar 30-90s. Si pasa de 2 minutos, usa “Refrescar todo”.
+              </p>
+            </div>
+          ) : authorityError ? (
+            <div className="error">
+              <p>{authorityError}</p>
+            </div>
+          ) : authority ? (
             <div className="authority-grid">
               <div className="authority-card">
                 <h3>Benchmarks</h3>
@@ -568,7 +635,7 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <p className="muted">Cargando score de autoridad...</p>
+            <p className="muted">Ejecuta una investigación para calcular el score.</p>
           )}
         </section>
 
@@ -577,23 +644,46 @@ export default function App() {
             <h2>Mapa de temas</h2>
             <span>Clusters y gaps</span>
           </div>
-          {topics ? (
+          {topicsLoading ? (
+            <div className="loading-card">
+              <div className="loading-row">
+                <span className="loading-spinner" aria-hidden="true" />
+                <div>
+                  <p className="loading-title">Generando clusters de temas</p>
+                  <p className="muted">Tiempo transcurrido: {topicsElapsed}</p>
+                </div>
+              </div>
+              <div className="loading-bar" />
+              <div className="loading-steps">
+                <span className="loading-pill">Agrupando tópicos</span>
+                <span className="loading-pill">Detectando gaps</span>
+                <span className="loading-pill">Sintetizando enfoque</span>
+              </div>
+              <p className="loading-hint">
+                Esto puede tardar 30-90s. Si pasa de 2 minutos, usa “Refrescar todo”.
+              </p>
+            </div>
+          ) : topicsError ? (
+            <div className="error">
+              <p>{topicsError}</p>
+            </div>
+          ) : topics ? (
             <div className="topics-grid">
               <div className="topics-section">
                 <h3>Clusters dominantes</h3>
                 <div className="cluster-grid">
-                    {(Array.isArray(topics.clusters) ? topics.clusters : []).map((cluster: any, index: number) => (
-                      <article key={index} className="cluster-card">
-                        <h4>{cluster.nombre}</h4>
-                        <p>{cluster.descripcion}</p>
-                        <ul>
-                          {(Array.isArray(cluster.ejemplos) ? cluster.ejemplos : []).map((item: string, i: number) => (
-                            <li key={i}>{item}</li>
-                          ))}
-                        </ul>
-                      </article>
-                    ))}
-                  </div>
+                  {(Array.isArray(topics.clusters) ? topics.clusters : []).map((cluster: any, index: number) => (
+                    <article key={index} className="cluster-card">
+                      <h4>{cluster.nombre}</h4>
+                      <p>{cluster.descripcion}</p>
+                      <ul>
+                        {(Array.isArray(cluster.ejemplos) ? cluster.ejemplos : []).map((item: string, i: number) => (
+                          <li key={i}>{item}</li>
+                        ))}
+                      </ul>
+                    </article>
+                  ))}
+                </div>
               </div>
               <div className="topics-section">
                 <h3>Gaps y oportunidades</h3>
@@ -621,7 +711,7 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <p className="muted">Generando clusters de temas...</p>
+            <p className="muted">Ejecuta una investigación para generar el mapa de temas.</p>
           )}
         </section>
 
@@ -827,4 +917,66 @@ export default function App() {
       </main>
     </div>
   );
+  async function fetchInsights(runId: number, refresh = false) {
+    setTopicsLoading(true);
+    setAuthorityLoading(true);
+    setTopicsError(null);
+    setAuthorityError(null);
+    setTopicsStartedAt(Date.now());
+    setAuthorityStartedAt(Date.now());
+    try {
+      const [insightsRes, topicsRes, authorityRes] = await Promise.all([
+        fetch(
+          `${API_BASE}/api/insights/overview?runId=${runId}${refresh ? "&refresh=1" : ""}`
+        ),
+        fetch(`${API_BASE}/api/insights/topics?runId=${runId}${refresh ? "&refresh=1" : ""}`),
+        fetch(`${API_BASE}/api/analysis/authority?runId=${runId}`),
+      ]);
+
+      const insightsData = await insightsRes.json().catch(() => null);
+      if (insightsRes.ok) {
+        setInsights(insightsData?.insights || null);
+        setOverviewUpdatedAt(insightsData?.updatedAt || null);
+      } else {
+        setInsights(null);
+      }
+
+      const topicsData = await topicsRes.json().catch(() => null);
+      if (topicsRes.ok) {
+        setTopics(topicsData?.insights || null);
+        setTopicsUpdatedAt(topicsData?.updatedAt || null);
+        setTopicsError(null);
+      } else {
+        setTopics(null);
+        setTopicsError(topicsData?.error || "No se pudieron generar los temas.");
+      }
+
+      const authorityData = await authorityRes.json().catch(() => null);
+      if (authorityRes.ok) {
+        setAuthority(authorityData || null);
+        setAuthorityError(null);
+      } else {
+        setAuthority(null);
+        setAuthorityError(authorityData?.error || "No se pudo calcular el score de autoridad.");
+      }
+    } catch (err: any) {
+      setTopics(null);
+      setAuthority(null);
+      setTopicsError(err?.message || "No se pudieron generar los temas.");
+      setAuthorityError(err?.message || "No se pudo calcular el score de autoridad.");
+    } finally {
+      setTopicsLoading(false);
+      setAuthorityLoading(false);
+    }
+  }
+
+  async function refreshAllInsights() {
+    if (!activeRun?.run?.id) return;
+    setInsightsRefreshing(true);
+    await Promise.all([
+      fetchInsights(activeRun.run.id, true),
+      fetchNextActions(activeRun.run.id, true),
+    ]);
+    setInsightsRefreshing(false);
+  }
 }

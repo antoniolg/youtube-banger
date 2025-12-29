@@ -190,16 +190,124 @@ button:disabled {
   font-size: 0.85rem;
   padding: 0.5rem 1rem;
   box-shadow: none;
+  position: relative;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .action-button:hover {
   transform: none;
 }
 
+.action-button:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.action-button.is-loading {
+  padding-right: 2.1rem;
+  background: rgba(31, 110, 122, 0.25);
+}
+
+.action-button.is-loading::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-top: -0.35rem;
+  border-radius: 50%;
+  border: 2px solid rgba(31, 110, 122, 0.35);
+  border-top-color: rgba(31, 110, 122, 0.9);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .actions-meta {
   display: flex;
   align-items: center;
   gap: 0.8rem;
+}
+
+.loading-card {
+  border: 1px dashed rgba(31, 110, 122, 0.25);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.7);
+  display: grid;
+  gap: 0.8rem;
+}
+
+.loading-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.loading-spinner {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  border: 2px solid rgba(31, 110, 122, 0.3);
+  border-top-color: rgba(31, 110, 122, 0.9);
+  animation: spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+
+.loading-title {
+  font-weight: 600;
+}
+
+.loading-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(31, 110, 122, 0.15),
+    rgba(31, 110, 122, 0.45),
+    rgba(31, 110, 122, 0.15)
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+.loading-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.loading-pill {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(31, 110, 122, 0.12);
+  color: var(--aqua);
+  border: 1px solid rgba(31, 110, 122, 0.2);
+}
+
+.loading-hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+
+@keyframes shimmer {
+  from {
+    background-position: 0% 0%;
+  }
+  to {
+    background-position: 200% 0%;
+  }
 }
 
 .summary-grid {

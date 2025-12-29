@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import { pool, migrate } from "./db.js";
 import { searchVideos, fetchVideoDetails, fetchChannelDetails } from "./youtube.js";
-import { generateInsights } from "./gemini.js";
+import { generateInsights, normalizeGeminiInsight } from "./gemini.js";
 import { DEFAULT_SCOPES, exchangeCodeForTokens, getAuthUrl, getAuthorizedClient } from "./oauth.js";
 import { google } from "googleapis";
 import { computeAuthority } from "./analysis.js";
@@ -262,7 +262,11 @@ app.get("/api/insights/overview", async (req, res) => {
     if (!refresh) {
       const cached = await getCachedInsight(runId, "overview");
       if (cached) {
-        return res.json({ insights: cached.content, cached: true, updatedAt: cached.updatedAt });
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(runId, "overview", normalized);
+        }
+        return res.json({ insights: normalized, cached: true, updatedAt: cached.updatedAt });
       }
     }
 
@@ -278,7 +282,8 @@ app.get("/api/insights/overview", async (req, res) => {
     );
 
     const prompt = buildInsightsPrompt(videosResult.rows);
-    const insights = await generateInsights(prompt);
+    const rawInsights = await generateInsights(prompt, OVERVIEW_SCHEMA);
+    const insights = normalizeGeminiInsight(rawInsights);
     const updatedAt = await saveCachedInsight(runId, "overview", insights);
     res.json({ insights, cached: false, updatedAt });
   } catch (error: any) {
@@ -295,7 +300,11 @@ app.get("/api/insights/topics", async (req, res) => {
     if (!refresh) {
       const cached = await getCachedInsight(runId, "topics");
       if (cached) {
-        return res.json({ insights: cached.content, cached: true, updatedAt: cached.updatedAt });
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(runId, "topics", normalized);
+        }
+        return res.json({ insights: normalized, cached: true, updatedAt: cached.updatedAt });
       }
     }
 
@@ -311,7 +320,8 @@ app.get("/api/insights/topics", async (req, res) => {
     );
 
     const prompt = buildTopicsPrompt(videosResult.rows);
-    const insights = await generateInsights(prompt);
+    const rawInsights = await generateInsights(prompt, TOPICS_SCHEMA);
+    const insights = normalizeGeminiInsight(rawInsights);
     const updatedAt = await saveCachedInsight(runId, "topics", insights);
     res.json({ insights, cached: false, updatedAt });
   } catch (error: any) {
@@ -328,7 +338,11 @@ app.get("/api/insights/next-actions", async (req, res) => {
     if (!refresh) {
       const cached = await getCachedInsight(runId, "next-actions");
       if (cached) {
-        return res.json({ insights: cached.content, cached: true, updatedAt: cached.updatedAt });
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(runId, "next-actions", normalized);
+        }
+        return res.json({ insights: normalized, cached: true, updatedAt: cached.updatedAt });
       }
     }
 
@@ -384,7 +398,8 @@ app.get("/api/insights/next-actions", async (req, res) => {
       focusRatio,
     });
 
-    const insights = await generateInsights(prompt);
+    const rawInsights = await generateInsights(prompt, NEXT_ACTIONS_SCHEMA);
+    const insights = normalizeGeminiInsight(rawInsights);
     const updatedAt = await saveCachedInsight(runId, "next-actions", insights);
     res.json({ insights, cached: false, updatedAt });
   } catch (error: any) {
@@ -437,6 +452,19 @@ Muestra de videos:\n${list}\n
 Consejos: prioriza ideas accionables, metodologías, experimentos, casos reales, y framing de autoridad.`;
 }
 
+const OVERVIEW_SCHEMA = {
+  type: "object",
+  properties: {
+    posicionamiento: { type: "array", items: { type: "string" } },
+    gaps: { type: "array", items: { type: "string" } },
+    series_ideas: { type: "array", items: { type: "string" } },
+    formatos: { type: "array", items: { type: "string" } },
+    optimizacion: { type: "array", items: { type: "string" } },
+  },
+  required: ["posicionamiento", "gaps", "series_ideas", "formatos", "optimizacion"],
+  additionalProperties: false,
+};
+
 function isAllowedImageUrl(url: string) {
   return (
     url.startsWith("https://i.ytimg.com/") ||
@@ -472,6 +500,30 @@ ${list}
 
 Reglas: prioriza metodologia, casos reales, criterios de decision y arquitectura. Evita tono influencer.`;
 }
+
+const TOPICS_SCHEMA = {
+  type: "object",
+  properties: {
+    clusters: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          nombre: { type: "string" },
+          descripcion: { type: "string" },
+          ejemplos: { type: "array", items: { type: "string" } },
+        },
+        required: ["nombre", "descripcion", "ejemplos"],
+        additionalProperties: false,
+      },
+    },
+    gaps: { type: "array", items: { type: "string" } },
+    series_ideas: { type: "array", items: { type: "string" } },
+    enfoque_autoridad: { type: "array", items: { type: "string" } },
+  },
+  required: ["clusters", "gaps", "series_ideas", "enfoque_autoridad"],
+  additionalProperties: false,
+};
 
 function buildNextActionsPrompt(payload: any) {
   const { run, stats, videos, channels, authority, analytics, topVideos, focusRatio } = payload;
@@ -545,6 +597,45 @@ Devuelve SOLO JSON valido con esta estructura exacta:
 
 Reglas: propon exactamente 3 acciones, concretas, con alto impacto y orientadas a autoridad. Evita recomendaciones vagas o de influencer.`;
 }
+
+const NEXT_ACTIONS_SCHEMA = {
+  type: "object",
+  properties: {
+    acciones: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          prioridad: { type: "integer" },
+          titulo: { type: "string" },
+          por_que: { type: "string" },
+          pasos: { type: "array", items: { type: "string" } },
+          tiempo_estimado: { type: "string" },
+          kpi: { type: "array", items: { type: "string" } },
+        },
+        required: ["prioridad", "titulo", "por_que", "pasos", "tiempo_estimado", "kpi"],
+        additionalProperties: false,
+      },
+    },
+    plan_30_dias: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          semana: { type: "string" },
+          objetivo: { type: "string" },
+          entregables: { type: "array", items: { type: "string" } },
+        },
+        required: ["semana", "objetivo", "entregables"],
+        additionalProperties: false,
+      },
+    },
+    metricas_clave: { type: "array", items: { type: "string" } },
+    alertas: { type: "array", items: { type: "string" } },
+  },
+  required: ["acciones", "plan_30_dias", "metricas_clave", "alertas"],
+  additionalProperties: false,
+};
 
 async function safeAnalyticsSummary() {
   try {
