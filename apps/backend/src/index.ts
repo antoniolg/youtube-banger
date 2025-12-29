@@ -302,6 +302,70 @@ app.get("/api/insights/topics", async (req, res) => {
   }
 });
 
+app.get("/api/insights/next-actions", async (req, res) => {
+  try {
+    const runId = Number(req.query.runId);
+    if (!runId) return res.status(400).json({ error: "runId is required" });
+
+    const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [runId]);
+    if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
+
+    const videosResult = await pool.query(
+      `SELECT v.id, v.title, v.description, v.published_at, v.duration_seconds, v.view_count, v.like_count, v.comment_count,
+              v.channel_id, c.title AS channel_title, c.subscriber_count, v.thumbnail_url
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+       ORDER BY v.view_count DESC NULLS LAST
+       LIMIT 30`,
+      [runId]
+    );
+
+    const channelsResult = await pool.query(
+      `SELECT v.channel_id, c.title, c.subscriber_count
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+       GROUP BY v.channel_id, c.title, c.subscriber_count
+       ORDER BY c.subscriber_count DESC NULLS LAST
+       LIMIT 8`,
+      [runId]
+    );
+
+    const statsResult = await pool.query(
+      `SELECT COUNT(*)::int AS videos, AVG(view_count)::float8 AS avg_views, AVG(duration_seconds)::float8 AS avg_duration
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       WHERE srv.run_id = $1`,
+      [runId]
+    );
+
+    const authority = computeAuthority(videosResult.rows);
+
+    const analytics = await safeAnalyticsSummary();
+    const topVideos = await safeAnalyticsTopVideos();
+    const focusRatio = computeFocusRatio(topVideos?.items || []);
+
+    const prompt = buildNextActionsPrompt({
+      run: runResult.rows[0],
+      stats: statsResult.rows[0],
+      videos: videosResult.rows,
+      channels: channelsResult.rows,
+      authority,
+      analytics,
+      topVideos,
+      focusRatio,
+    });
+
+    const insights = await generateInsights(prompt);
+    res.json({ insights });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
 app.get("/api/analysis/authority", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
@@ -364,9 +428,9 @@ function buildTopicsPrompt(videos: any[]) {
     })
     .join("\n");
 
-  return `Eres estratega de contenido para YouTube en español. Tema: IA aplicada al desarrollo de software.
+  return `Eres estratega de contenido para YouTube en espanol. Tema: IA aplicada al desarrollo de software.
 
-Analiza la muestra y devuelve SOLO JSON válido con esta estructura exacta:
+Analiza la muestra y devuelve SOLO JSON valido con esta estructura exacta:
 {
   "clusters": [
     {"nombre": "...", "descripcion": "...", "ejemplos": ["...","..."]},
@@ -380,7 +444,174 @@ Analiza la muestra y devuelve SOLO JSON válido con esta estructura exacta:
 Muestra:
 ${list}
 
-Reglas: prioriza metodología, casos reales, criterios de decisión y arquitectura. Evita tono influencer.`;
+Reglas: prioriza metodologia, casos reales, criterios de decision y arquitectura. Evita tono influencer.`;
+}
+
+function buildNextActionsPrompt(payload: any) {
+  const { run, stats, videos, channels, authority, analytics, topVideos, focusRatio } = payload;
+  const marketSample = videos
+    .slice(0, 15)
+    .map(
+      (video: any) =>
+        `- ${video.title} | ${video.channel_title} | ${video.view_count ?? "n/a"} views | ${Math.round(
+          (video.duration_seconds ?? 0) / 60
+        )} min`
+    )
+    .join("\n");
+
+  const channelList = channels
+    .map((channel: any) => `- ${channel.title} | ${channel.subscriber_count ?? "n/a"} subs`)
+    .join("\n");
+
+  const topVideoList = (topVideos?.items || [])
+    .slice(0, 10)
+    .map((item: any) => `- ${item.title} | ${item.views ?? "n/a"} views | ${item.averageViewDuration ?? "n/a"}s`)
+    .join("\n");
+
+  return `Eres estratega de crecimiento en YouTube en espanol para un canal de IA aplicada al desarrollo de software.
+Objetivo: autoridad tecnica (no influencer), con foco en metodologia, casos reales y productividad en equipos.
+
+Datos del mercado:
+- Query: ${run.query}
+- Videos analizados: ${stats?.videos ?? "n/a"}
+- Vistas promedio: ${stats?.avg_views ?? "n/a"}
+- Duracion promedio (min): ${Math.round((stats?.avg_duration ?? 0) / 60)}
+- Canales relevantes:
+${channelList}
+
+Muestra de videos top del mercado:
+${marketSample}
+
+Score de autoridad (benchmarks):
+- Avg video score: ${authority?.benchmarks?.avgVideoScore ?? "n/a"}
+- Top video score: ${authority?.benchmarks?.topVideoScore ?? "n/a"}
+
+Analytics del canal (ultimos 28 dias):
+${analytics ? JSON.stringify(analytics.metrics) : "No disponible"}
+
+Top videos del canal (90 dias):
+${topVideoList || "No disponible"}
+
+Enfoque IA aplicada (sobre top videos del canal):
+${focusRatio ? `${focusRatio.aiCount}/${focusRatio.total} (${Math.round(focusRatio.ratio * 100)}%)` : "No disponible"}
+
+Devuelve SOLO JSON valido con esta estructura exacta:
+{
+  "acciones": [
+    {
+      "titulo": "...",
+      "por_que": "...",
+      "pasos": ["...","..."],
+      "tiempo_estimado": "...",
+      "kpi": ["...","..."],
+      "prioridad": 1
+    }
+  ],
+  "plan_30_dias": [
+    {"semana": "Semana 1", "objetivo": "...", "entregables": ["...","..."]},
+    {"semana": "Semana 2", "objetivo": "...", "entregables": ["...","..."]},
+    {"semana": "Semana 3", "objetivo": "...", "entregables": ["...","..."]},
+    {"semana": "Semana 4", "objetivo": "...", "entregables": ["...","..."]}
+  ],
+  "metricas_clave": ["...","..."],
+  "alertas": ["..."]
+}
+
+Reglas: propon exactamente 3 acciones, concretas, con alto impacto y orientadas a autoridad. Evita recomendaciones vagas o de influencer.`;
+}
+
+async function safeAnalyticsSummary() {
+  try {
+    const auth = await getAuthorizedClient();
+    const analytics = google.youtubeAnalytics({ version: "v2", auth });
+    const { startDate, endDate } = getLastDaysRange(28);
+    const response = await analytics.reports.query({
+      ids: "channel==MINE",
+      startDate,
+      endDate,
+      metrics: "views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost",
+    });
+    const rows = response.data.rows?.[0] || [];
+    return {
+      range: { startDate, endDate },
+      metrics: {
+        views: rows[0] ?? 0,
+        estimatedMinutesWatched: rows[1] ?? 0,
+        averageViewDuration: rows[2] ?? 0,
+        subscribersGained: rows[3] ?? 0,
+        subscribersLost: rows[4] ?? 0,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function safeAnalyticsTopVideos() {
+  try {
+    const auth = await getAuthorizedClient();
+    const analytics = google.youtubeAnalytics({ version: "v2", auth });
+    const { startDate, endDate } = getLastDaysRange(90);
+    const response = await analytics.reports.query({
+      ids: "channel==MINE",
+      startDate,
+      endDate,
+      metrics: "views,estimatedMinutesWatched,averageViewDuration",
+      dimensions: "video",
+      sort: "-views",
+      maxResults: 12,
+    });
+
+    const rows = response.data.rows || [];
+    const videoIds = rows.map((row) => row[0]);
+    const details = await fetchVideoDetails(videoIds);
+    const detailMap = new Map(details.map((item) => [item.id, item]));
+    const items = rows.map((row) => {
+      const [videoId, views, minutes, avgDuration] = row;
+      const detail = detailMap.get(videoId);
+      return {
+        videoId,
+        title: detail?.title || "Video",
+        views,
+        averageViewDuration: avgDuration,
+      };
+    });
+    return { range: { startDate, endDate }, items };
+  } catch {
+    return null;
+  }
+}
+
+function computeFocusRatio(items: any[]) {
+  if (!items.length) return null;
+  const aiKeywords = [
+    "ia",
+    "ai",
+    "inteligencia artificial",
+    "gpt",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "codex",
+    "cursor",
+    "agente",
+    "agent",
+    "multi-agente",
+    "prompt",
+    "llm",
+    "copilot",
+    "replit",
+    "vibe coding",
+  ];
+  const aiCount = items.filter((item: any) => {
+    const text = String(item.title || "").toLowerCase();
+    return aiKeywords.some((keyword) => text.includes(keyword));
+  }).length;
+  return {
+    aiCount,
+    total: items.length,
+    ratio: aiCount / items.length,
+  };
 }
 
 async function saveRun(params: {
