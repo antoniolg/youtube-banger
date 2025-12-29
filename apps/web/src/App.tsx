@@ -48,6 +48,8 @@ export default function App() {
   const [authority, setAuthority] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
   const [topVideos, setTopVideos] = useState<any>(null);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [topVideosError, setTopVideosError] = useState<string | null>(null);
   const [oauthRequired, setOauthRequired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,17 +103,33 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/analytics/summary`);
     if (res.status === 401) {
       setOauthRequired(true);
+      setAnalyticsError(null);
       return;
     }
     const data = await res.json();
+    if (!res.ok) {
+      setAnalytics(null);
+      setAnalyticsError(data.error || "No se pudieron cargar las métricas.");
+      return;
+    }
     setAnalytics(data);
+    setAnalyticsError(null);
     setOauthRequired(false);
 
     const topRes = await fetch(`${API_BASE}/api/analytics/top-videos`);
-    if (topRes.ok) {
-      const topData = await topRes.json();
-      setTopVideos(topData);
+    if (topRes.status === 401) {
+      setTopVideos(null);
+      setTopVideosError(null);
+      return;
     }
+    const topData = await topRes.json();
+    if (!topRes.ok) {
+      setTopVideos(null);
+      setTopVideosError(topData.error || "No se pudieron cargar los top videos.");
+      return;
+    }
+    setTopVideos(topData);
+    setTopVideosError(null);
   }
 
   async function handleIngest() {
@@ -393,6 +411,10 @@ export default function App() {
                 Conectar YouTube Analytics
               </a>
             </div>
+          ) : analyticsError ? (
+            <div className="error">
+              <p>{analyticsError}</p>
+            </div>
           ) : analytics ? (
             <div className="analytics-grid">
               <div className="stat">
@@ -419,6 +441,7 @@ export default function App() {
           ) : (
             <p className="muted">Cargando métricas...</p>
           )}
+          {topVideosError ? <p className="muted">{topVideosError}</p> : null}
           {topVideos?.items?.length ? (
             <div className="top-videos">
               <h3>Tus videos con más tracción</h3>
