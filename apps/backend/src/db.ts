@@ -84,6 +84,20 @@ CREATE TABLE IF NOT EXISTS video_ideation_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS video_ideas (
+  id SERIAL PRIMARY KEY,
+  run_id INT NOT NULL REFERENCES search_runs(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  angle TEXT,
+  reason TEXT,
+  effort TEXT,
+  cta TEXT,
+  score INT,
+  source TEXT NOT NULL DEFAULT 'user',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS oauth_tokens (
   provider TEXT PRIMARY KEY,
   access_token TEXT,

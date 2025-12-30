@@ -39,6 +39,11 @@ go run . --query "IA aplicada al desarrollo de software" --max 25
 - GET `/api/plan/month/video?runId=ID&index=0&planUpdatedAt=ISO`
 - POST `/api/plan/month/video/notes`
 - POST `/api/plan/month/video/chat`
+- GET `/api/ideas/suggest?runId=ID`
+- GET `/api/ideas?runId=ID`
+- POST `/api/ideas`
+- DELETE `/api/ideas/:id`
+- POST `/api/ideas/validate`
 - GET `/api/inspiration/global?runId=ID`
 - GET `/api/analysis/authority?runId=ID`
 - GET `/api/oauth/google/start`

@@ -564,6 +564,153 @@ app.get("/api/inspiration/global", async (req, res) => {
   }
 });
 
+app.get("/api/ideas/suggest", async (req, res) => {
+  try {
+    const runId = Number(req.query.runId);
+    if (!runId) return res.status(400).json({ error: "runId is required" });
+    const refresh = req.query.refresh === "1";
+
+    if (!refresh) {
+      const cached = await getCachedInsight(runId, "idea-suggestions");
+      if (cached) {
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(runId, "idea-suggestions", normalized);
+        }
+        return res.json({ ideas: normalized.ideas || [], cached: true, updatedAt: cached.updatedAt });
+      }
+    }
+
+    const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [runId]);
+    if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
+
+    const videosResult = await pool.query(
+      `SELECT v.title, v.description, v.view_count, v.duration_seconds, c.title AS channel_title
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
+       ORDER BY v.view_count DESC NULLS LAST
+       LIMIT 40`,
+      [runId, MIN_LONG_SECONDS]
+    );
+
+    const topicsCached = await getCachedInsight(runId, "topics");
+    const topicsSummary = topicsCached ? normalizeGeminiInsight(topicsCached.content) : null;
+
+    const prompt = buildIdeaSuggestionsPrompt({
+      query: runResult.rows[0].query,
+      videos: videosResult.rows,
+      topicsSummary,
+    });
+
+    const rawIdeas = await generateInsights(prompt, IDEA_SUGGESTIONS_SCHEMA);
+    const suggestions = normalizeGeminiInsight(rawIdeas);
+    const updatedAt = await saveCachedInsight(runId, "idea-suggestions", suggestions);
+    res.json({ ideas: suggestions.ideas || [], cached: false, updatedAt });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.get("/api/ideas", async (req, res) => {
+  try {
+    const runId = Number(req.query.runId);
+    if (!runId) return res.status(400).json({ error: "runId is required" });
+    const result = await pool.query(
+      `SELECT id, title, angle, reason, effort, cta, score, source, created_at
+       FROM video_ideas
+       WHERE run_id = $1
+       ORDER BY created_at DESC`,
+      [runId]
+    );
+    res.json({ ideas: result.rows });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.post("/api/ideas", async (req, res) => {
+  try {
+    const runId = Number(req.body.runId);
+    const title = String(req.body.title || "").trim();
+    const angle = req.body.angle ? String(req.body.angle) : null;
+    const reason = req.body.reason ? String(req.body.reason) : null;
+    const effort = req.body.effort ? String(req.body.effort) : null;
+    const cta = req.body.cta ? String(req.body.cta) : null;
+    const score = req.body.score !== undefined ? Number(req.body.score) : null;
+    const source = req.body.source ? String(req.body.source) : "user";
+    if (!runId || !title) return res.status(400).json({ error: "runId and title are required" });
+
+    const result = await pool.query(
+      `INSERT INTO video_ideas (run_id, title, angle, reason, effort, cta, score, source, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       RETURNING id, title, angle, reason, effort, cta, score, source, created_at`,
+      [runId, title, angle, reason, effort, cta, score, source]
+    );
+    res.status(201).json({ idea: result.rows[0] });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.delete("/api/ideas/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: "id is required" });
+    await pool.query("DELETE FROM video_ideas WHERE id = $1", [id]);
+    res.json({ ok: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.post("/api/ideas/validate", async (req, res) => {
+  try {
+    const runId = Number(req.body.runId);
+    const title = String(req.body.title || "").trim();
+    const angle = String(req.body.angle || "").trim();
+    const notes = String(req.body.notes || "").trim();
+    if (!runId || !title) {
+      return res.status(400).json({ error: "runId and title are required" });
+    }
+
+    const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [runId]);
+    if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
+
+    const videosResult = await pool.query(
+      `SELECT v.title, v.view_count, v.duration_seconds, c.title AS channel_title
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
+       ORDER BY v.view_count DESC NULLS LAST
+       LIMIT 25`,
+      [runId, MIN_LONG_SECONDS]
+    );
+
+    const topicsCached = await getCachedInsight(runId, "topics");
+    const topicsSummary = topicsCached ? normalizeGeminiInsight(topicsCached.content) : null;
+
+    const prompt = buildIdeaValidationPrompt({
+      query: runResult.rows[0].query,
+      title,
+      angle,
+      notes,
+      videos: videosResult.rows,
+      topicsSummary,
+    });
+
+    const rawValidation = await generateInsights(prompt, IDEA_VALIDATION_SCHEMA);
+    const validation = normalizeGeminiInsight(rawValidation);
+    res.json({ validation });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
 app.get("/api/plan/month/video", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
@@ -1093,6 +1240,155 @@ Muestra:
 ${list}
 
 Reglas: ideas importables al mercado hispano, tono autoridad técnica, evita clickbait.`;
+}
+
+const IDEA_SUGGESTIONS_SCHEMA = {
+  type: "object",
+  properties: {
+    ideas: {
+      type: "array",
+      minItems: 10,
+      maxItems: 10,
+      items: {
+        type: "object",
+        properties: {
+          titulo: { type: "string" },
+          angulo: { type: "string" },
+          razon: { type: "string" },
+          esfuerzo: { type: "string" },
+          cta: { type: "string" },
+          score: { type: "integer", minimum: 0, maximum: 100 },
+        },
+        required: ["titulo", "angulo", "razon", "esfuerzo", "cta", "score"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["ideas"],
+  additionalProperties: false,
+};
+
+const IDEA_VALIDATION_SCHEMA = {
+  type: "object",
+  properties: {
+    score: { type: "integer", minimum: 0, maximum: 100 },
+    veredicto: { type: "string" },
+    razon: { type: "string" },
+    mejoras: { type: "array", items: { type: "string" } },
+    titulo_refinado: { type: "string" },
+    angulo_refinado: { type: "string" },
+    cta: { type: "string" },
+    esfuerzo: { type: "string" },
+  },
+  required: ["score", "veredicto", "razon", "mejoras", "titulo_refinado", "angulo_refinado", "cta", "esfuerzo"],
+  additionalProperties: false,
+};
+
+function buildIdeaSuggestionsPrompt(payload: {
+  query: string;
+  videos: Array<{ title: string; channel_title: string; view_count: number; duration_seconds: number }>;
+  topicsSummary?: any;
+}) {
+  const list = payload.videos
+    .map(
+      (video) =>
+        `- ${video.title} | ${video.channel_title} | ${video.view_count ?? "n/a"} views | ${Math.round(
+          (video.duration_seconds ?? 0) / 60
+        )} min`
+    )
+    .join("\n");
+
+  const topicText = payload.topicsSummary
+    ? JSON.stringify(payload.topicsSummary)
+    : "No hay mapa de temas aún. Deduce pilares a partir de los títulos de mercado.";
+
+  return `Eres estratega de contenido para YouTube en español.
+Tema: IA aplicada al desarrollo de software. Objetivo: autoridad técnica (no influencer), metodología y criterio.
+Tiempo disponible: ${MAX_WEEKLY_HOURS} horas por semana.
+
+Devuelve SOLO JSON válido con esta estructura exacta:
+{
+  "ideas": [
+    {
+      "titulo": "...",
+      "angulo": "...",
+      "razon": "...",
+      "esfuerzo": "bajo|medio|alto",
+      "cta": "...",
+      "score": 0
+    }
+  ]
+}
+
+Reglas:
+- EXACTAMENTE 10 ideas.
+- Duración objetivo: videos largos 15-30 min.
+- Score 0-100: 50% autoridad, 30% crecimiento, 20% diferenciación.
+- Evita clickbait, incluye casos reales, metodología, criterio técnico y comparativas con datos.
+- CTA variada: lead magnet, newsletter, checklist, demo/plantilla, formación.
+- Evita repetir temas o ángulos entre sí.
+
+Contexto del mercado:
+- Query base: ${payload.query}
+- Mapa de temas: ${topicText}
+
+Muestra de videos con tracción:
+${list}`;
+}
+
+function buildIdeaValidationPrompt(payload: {
+  query: string;
+  title: string;
+  angle: string;
+  notes: string;
+  videos: Array<{ title: string; channel_title: string; view_count: number; duration_seconds: number }>;
+  topicsSummary?: any;
+}) {
+  const list = payload.videos
+    .map(
+      (video) =>
+        `- ${video.title} | ${video.channel_title} | ${video.view_count ?? "n/a"} views | ${Math.round(
+          (video.duration_seconds ?? 0) / 60
+        )} min`
+    )
+    .join("\n");
+
+  const topicText = payload.topicsSummary
+    ? JSON.stringify(payload.topicsSummary)
+    : "No hay mapa de temas aún. Deduce pilares a partir de los títulos de mercado.";
+
+  return `Eres estratega de crecimiento para YouTube en español.
+Canal: IA aplicada al desarrollo de software. Objetivo: autoridad técnica, evitar tono influencer.
+
+Evalúa si esta idea encaja y propón mejoras para maximizar autoridad y crecimiento.
+Devuelve SOLO JSON válido con esta estructura exacta:
+{
+  "score": 0,
+  "veredicto": "apta|ajustable|no encaja",
+  "razon": "...",
+  "mejoras": ["...","..."],
+  "titulo_refinado": "...",
+  "angulo_refinado": "...",
+  "cta": "...",
+  "esfuerzo": "bajo|medio|alto"
+}
+
+Reglas:
+- Score 0-100 basado en autoridad (50%), crecimiento (30%) y diferenciación (20%).
+- Si no encaja, adapta el ángulo para que sí encaje.
+- Mantén duración 15-30 min y enfoque en casos reales/metodología.
+
+Idea propuesta:
+- Título: ${payload.title}
+- Ángulo: ${payload.angle || "No especificado"}
+- Notas: ${payload.notes || "Sin notas"}
+
+Contexto del mercado:
+- Query base: ${payload.query}
+- Mapa de temas: ${topicText}
+
+Muestra de videos con tracción:
+${list}`;
 }
 
 async function loadMonthPlanVideo(runId: number, videoIndex: number, planUpdatedAt: string) {

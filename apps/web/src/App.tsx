@@ -74,6 +74,12 @@ function formatElapsed(start: number | null) {
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
+function formatScore(value: any) {
+  const num = Number(value);
+  if (Number.isNaN(num)) return null;
+  return Math.round(num);
+}
+
 type Run = {
   id: number;
   query: string;
@@ -117,6 +123,22 @@ export default function App() {
   const [globalLoading, setGlobalLoading] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [globalUpdatedAt, setGlobalUpdatedAt] = useState<string | null>(null);
+  const [ideaSuggestions, setIdeaSuggestions] = useState<any[]>([]);
+  const [ideaSuggestionsLoading, setIdeaSuggestionsLoading] = useState(false);
+  const [ideaSuggestionsError, setIdeaSuggestionsError] = useState<string | null>(null);
+  const [ideaSuggestionsUpdatedAt, setIdeaSuggestionsUpdatedAt] = useState<string | null>(null);
+  const [savedIdeas, setSavedIdeas] = useState<any[]>([]);
+  const [savedIdeasLoading, setSavedIdeasLoading] = useState(false);
+  const [savedIdeasError, setSavedIdeasError] = useState<string | null>(null);
+  const [ideaTitle, setIdeaTitle] = useState("");
+  const [ideaAngle, setIdeaAngle] = useState("");
+  const [ideaNotes, setIdeaNotes] = useState("");
+  const [ideaValidation, setIdeaValidation] = useState<any>(null);
+  const [ideaValidationLoading, setIdeaValidationLoading] = useState(false);
+  const [ideaValidationError, setIdeaValidationError] = useState<string | null>(null);
+  const [ideaSavingIndex, setIdeaSavingIndex] = useState<number | null>(null);
+  const [ideaDeletingId, setIdeaDeletingId] = useState<number | null>(null);
+  const [ideaSavingValidation, setIdeaSavingValidation] = useState(false);
   const [videoDetailOpen, setVideoDetailOpen] = useState(false);
   const [videoDetailIndex, setVideoDetailIndex] = useState<number | null>(null);
   const [videoDetailLoading, setVideoDetailLoading] = useState(false);
@@ -173,9 +195,15 @@ export default function App() {
     }
     const data = await res.json();
     setActiveRun(data);
+    setIdeaValidation(null);
+    setIdeaTitle("");
+    setIdeaAngle("");
+    setIdeaNotes("");
     await fetchInsights(runId);
     fetchMonthPlan(runId);
     fetchGlobalInspiration(runId);
+    fetchIdeaSuggestions(runId);
+    fetchSavedIdeas(runId);
   }
 
   async function fetchAnalytics() {
@@ -250,6 +278,180 @@ export default function App() {
       setGlobalInspiration(null);
     } finally {
       setGlobalLoading(false);
+    }
+  }
+
+  async function fetchIdeaSuggestions(runId: number, refresh = false) {
+    setIdeaSuggestionsLoading(true);
+    setIdeaSuggestionsError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/ideas/suggest?runId=${runId}${refresh ? "&refresh=1" : ""}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudieron generar ideas.");
+      }
+      setIdeaSuggestions(Array.isArray(data.ideas) ? data.ideas : []);
+      setIdeaSuggestionsUpdatedAt(data.updatedAt || null);
+    } catch (err: any) {
+      setIdeaSuggestionsError(err.message);
+      setIdeaSuggestions([]);
+    } finally {
+      setIdeaSuggestionsLoading(false);
+    }
+  }
+
+  async function fetchSavedIdeas(runId: number) {
+    setSavedIdeasLoading(true);
+    setSavedIdeasError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas?runId=${runId}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudieron cargar las ideas guardadas.");
+      }
+      setSavedIdeas(Array.isArray(data.ideas) ? data.ideas : []);
+    } catch (err: any) {
+      setSavedIdeasError(err.message);
+      setSavedIdeas([]);
+    } finally {
+      setSavedIdeasLoading(false);
+    }
+  }
+
+  async function saveSuggestedIdea(idea: any, index: number) {
+    if (!activeRun?.run?.id) return;
+    setIdeaSavingIndex(index);
+    setSavedIdeasError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: activeRun.run.id,
+          title: idea.titulo || idea.title,
+          angle: idea.angulo || idea.angle,
+          reason: idea.razon || idea.reason,
+          effort: idea.esfuerzo || idea.effort,
+          cta: idea.cta,
+          score: Number.isFinite(Number(idea.score)) ? Math.round(Number(idea.score)) : null,
+          source: "suggested",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo guardar la idea.");
+      }
+      setSavedIdeas((prev) => [data.idea, ...prev]);
+      setIdeaSuggestions((prev) => prev.filter((_, i) => i !== index));
+    } catch (err: any) {
+      setSavedIdeasError(err.message);
+    } finally {
+      setIdeaSavingIndex(null);
+    }
+  }
+
+  function discardSuggestedIdea(index: number) {
+    setIdeaSuggestions((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function deleteSavedIdea(id: number) {
+    setIdeaDeletingId(id);
+    setSavedIdeasError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo eliminar la idea.");
+      }
+      setSavedIdeas((prev) => prev.filter((item) => item.id !== id));
+    } catch (err: any) {
+      setSavedIdeasError(err.message);
+    } finally {
+      setIdeaDeletingId(null);
+    }
+  }
+
+  async function validateIdea() {
+    if (!activeRun?.run?.id) return;
+    if (!ideaTitle.trim()) {
+      setIdeaValidationError("Añade un título para validar la idea.");
+      return;
+    }
+    setIdeaValidationLoading(true);
+    setIdeaValidationError(null);
+    setIdeaValidation(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: activeRun.run.id,
+          title: ideaTitle.trim(),
+          angle: ideaAngle.trim(),
+          notes: ideaNotes.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo validar la idea.");
+      }
+      setIdeaValidation(data.validation || null);
+    } catch (err: any) {
+      setIdeaValidationError(err.message);
+      setIdeaValidation(null);
+    } finally {
+      setIdeaValidationLoading(false);
+    }
+  }
+
+  function applyValidation() {
+    if (!ideaValidation) return;
+    if (ideaValidation.titulo_refinado) {
+      setIdeaTitle(ideaValidation.titulo_refinado);
+    }
+    if (ideaValidation.angulo_refinado) {
+      setIdeaAngle(ideaValidation.angulo_refinado);
+    }
+  }
+
+  async function saveValidatedIdea() {
+    if (!activeRun?.run?.id || !ideaValidation) return;
+    setIdeaSavingValidation(true);
+    setSavedIdeasError(null);
+    const title = (ideaValidation.titulo_refinado || ideaTitle).trim();
+    if (!title) {
+      setSavedIdeasError("La idea validada no tiene título.");
+      setIdeaSavingValidation(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: activeRun.run.id,
+          title,
+          angle: ideaValidation.angulo_refinado || ideaAngle.trim(),
+          reason: ideaValidation.razon,
+          effort: ideaValidation.esfuerzo,
+          cta: ideaValidation.cta,
+          score: Number.isFinite(Number(ideaValidation.score))
+            ? Math.round(Number(ideaValidation.score))
+            : null,
+          source: "validated",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo guardar la idea.");
+      }
+      setSavedIdeas((prev) => [data.idea, ...prev]);
+    } catch (err: any) {
+      setSavedIdeasError(err.message);
+    } finally {
+      setIdeaSavingValidation(false);
     }
   }
 
@@ -448,6 +650,8 @@ export default function App() {
     return new Date(Math.max(...dates)).toISOString();
   }, [overviewUpdatedAt, topicsUpdatedAt, monthPlanUpdatedAt]);
 
+  const validationScore = formatScore(ideaValidation?.score);
+
   return (
     <div className="app">
       <header className="hero">
@@ -517,6 +721,212 @@ export default function App() {
             <p className="muted">Conecta Analytics y ejecuta una investigación para ver el resumen.</p>
           )}
           {alert ? <div className="alert-card">{alert}</div> : null}
+        </section>
+
+        <section className="panel ideas">
+          <div className="panel__header">
+            <h2>Ideas accionables</h2>
+            <div className="actions-meta">
+              <span className="muted">
+                {ideaSuggestionsUpdatedAt ? `Actualizado ${formatAge(ideaSuggestionsUpdatedAt)}` : "Sin datos"}
+              </span>
+              <button
+                className={`action-button ${ideaSuggestionsLoading ? "is-loading" : ""}`}
+                onClick={() => activeRun?.run?.id && fetchIdeaSuggestions(activeRun.run.id, true)}
+                disabled={ideaSuggestionsLoading || !activeRun?.run?.id}
+                aria-busy={ideaSuggestionsLoading}
+              >
+                {ideaSuggestionsLoading ? "Generando..." : "Generar ideas"}
+              </button>
+            </div>
+          </div>
+          <p className="muted">
+            Propón o guarda ideas listas para ejecutar. Valida cada propuesta con un score de 0 a 100.
+          </p>
+          <div className="ideas-layout">
+            <div className="ideas-column">
+              <div className="ideas-block">
+                <div className="ideas-block__header">
+                  <h3>Ideas sugeridas</h3>
+                  <span className="muted">
+                    {ideaSuggestions.length ? `${ideaSuggestions.length} ideas` : "Sin ideas"}
+                  </span>
+                </div>
+                {ideaSuggestionsError ? <div className="error">{ideaSuggestionsError}</div> : null}
+                {ideaSuggestionsLoading && !ideaSuggestions.length ? (
+                  <p className="muted">Generando ideas...</p>
+                ) : null}
+                {ideaSuggestions.length ? (
+                  <div className="idea-grid">
+                    {ideaSuggestions.map((idea, index) => {
+                      const score = formatScore(idea.score);
+                      return (
+                        <article key={`${idea.titulo}-${index}`} className="idea-card">
+                          <div className="idea-card__header">
+                            <span className="score-pill">{score !== null ? `${score} pts` : "—"}</span>
+                            <div className="idea-card__actions">
+                              <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => saveSuggestedIdea(idea, index)}
+                                disabled={ideaSavingIndex === index}
+                              >
+                                {ideaSavingIndex === index ? "Guardando..." : "Guardar"}
+                              </button>
+                              <button
+                                className="ghost-button subtle"
+                                type="button"
+                                onClick={() => discardSuggestedIdea(index)}
+                                disabled={ideaSavingIndex === index}
+                              >
+                                Descartar
+                              </button>
+                            </div>
+                          </div>
+                          <h4>{idea.titulo}</h4>
+                          <p className="muted">{idea.angulo || "Ángulo pendiente de definir."}</p>
+                          <p className="muted">Razón: {idea.razon || "—"}</p>
+                          <div className="idea-meta">
+                            <span>Esfuerzo: {idea.esfuerzo || "medio"}</span>
+                            <span>CTA: {idea.cta || "n/a"}</span>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : !ideaSuggestionsLoading && activeRun?.run?.id ? (
+                  <p className="muted">Pulsa “Generar ideas” para obtener propuestas nuevas.</p>
+                ) : !activeRun?.run?.id ? (
+                  <p className="muted">Lanza una investigación para generar ideas.</p>
+                ) : null}
+              </div>
+
+              <div className="ideas-block">
+                <h3>Validar idea</h3>
+                <div className="idea-form">
+                  <label>Título</label>
+                  <input
+                    value={ideaTitle}
+                    onChange={(event) => setIdeaTitle(event.target.value)}
+                    placeholder="Ej: Arquitectura AI-first para equipos pequeños"
+                  />
+                  <label>Ángulo</label>
+                  <textarea
+                    rows={3}
+                    value={ideaAngle}
+                    onChange={(event) => setIdeaAngle(event.target.value)}
+                    placeholder="Explica el enfoque, el experimento o el caso real..."
+                  />
+                  <label>Notas (opcional)</label>
+                  <textarea
+                    rows={3}
+                    value={ideaNotes}
+                    onChange={(event) => setIdeaNotes(event.target.value)}
+                    placeholder="Contexto, ejemplos, recursos internos..."
+                  />
+                  <button
+                    className={`action-button ${ideaValidationLoading ? "is-loading" : ""}`}
+                    type="button"
+                    onClick={validateIdea}
+                    disabled={ideaValidationLoading || !activeRun?.run?.id}
+                  >
+                    {ideaValidationLoading ? "Validando..." : "Validar idea"}
+                  </button>
+                </div>
+                {ideaValidationError ? <div className="error">{ideaValidationError}</div> : null}
+                {ideaValidation ? (
+                  <div className="validation-card">
+                    <div className="validation-header">
+                      <span className="score-pill">
+                        {validationScore !== null ? `${validationScore} pts` : "—"}
+                      </span>
+                      <span className="pill">{ideaValidation.veredicto}</span>
+                    </div>
+                    <p className="muted">{ideaValidation.razon || "Sin explicación."}</p>
+                    <div className="validation-grid">
+                      <div>
+                        <h4>Título refinado</h4>
+                        <p>{ideaValidation.titulo_refinado || "—"}</p>
+                      </div>
+                      <div>
+                        <h4>Ángulo refinado</h4>
+                        <p className="muted">{ideaValidation.angulo_refinado || "—"}</p>
+                      </div>
+                      <div className="idea-meta">
+                        <span>Esfuerzo: {ideaValidation.esfuerzo || "medio"}</span>
+                        <span>CTA: {ideaValidation.cta || "n/a"}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <h4>Mejoras sugeridas</h4>
+                      <ul>
+                        {asList(ideaValidation.mejoras).map((item: string, i: number) => (
+                          <li key={i}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="idea-card__actions">
+                      <button className="ghost-button" type="button" onClick={applyValidation}>
+                        Aplicar refinamiento
+                      </button>
+                      <button
+                        className={`action-button ${ideaSavingValidation ? "is-loading" : ""}`}
+                        type="button"
+                        onClick={saveValidatedIdea}
+                        disabled={ideaSavingValidation}
+                      >
+                        {ideaSavingValidation ? "Guardando..." : "Guardar idea"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="ideas-column">
+              <div className="ideas-block">
+                <div className="ideas-block__header">
+                  <h3>Mis ideas guardadas</h3>
+                  <span className="muted">
+                    {savedIdeas.length ? `${savedIdeas.length} ideas` : "Sin ideas guardadas"}
+                  </span>
+                </div>
+                {savedIdeasError ? <div className="error">{savedIdeasError}</div> : null}
+                {savedIdeasLoading ? <p className="muted">Cargando ideas guardadas...</p> : null}
+                {savedIdeas.length ? (
+                  <div className="idea-grid">
+                    {savedIdeas.map((idea: any) => {
+                      const score = formatScore(idea.score);
+                      return (
+                        <article key={idea.id} className="idea-card saved">
+                          <div className="idea-card__header">
+                            <span className="score-pill">{score !== null ? `${score} pts` : "—"}</span>
+                            <button
+                              className="ghost-button subtle"
+                              type="button"
+                              onClick={() => deleteSavedIdea(idea.id)}
+                              disabled={ideaDeletingId === idea.id}
+                            >
+                              {ideaDeletingId === idea.id ? "Eliminando..." : "Eliminar"}
+                            </button>
+                          </div>
+                          <h4>{idea.title}</h4>
+                          <p className="muted">{idea.angle || "Ángulo pendiente de definir."}</p>
+                          <p className="muted">Razón: {idea.reason || "—"}</p>
+                          <div className="idea-meta">
+                            <span>Esfuerzo: {idea.effort || "medio"}</span>
+                            <span>CTA: {idea.cta || "n/a"}</span>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : !savedIdeasLoading ? (
+                  <p className="muted">Guarda ideas sugeridas o validadas para verlas aquí.</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="panel plan">
