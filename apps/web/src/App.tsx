@@ -139,6 +139,8 @@ export default function App() {
   const [ideaSavingIndex, setIdeaSavingIndex] = useState<number | null>(null);
   const [ideaDeletingId, setIdeaDeletingId] = useState<number | null>(null);
   const [ideaSavingValidation, setIdeaSavingValidation] = useState(false);
+  const [openSuggestionIndexes, setOpenSuggestionIndexes] = useState<Record<number, boolean>>({});
+  const [openSavedIdeaIds, setOpenSavedIdeaIds] = useState<Record<number, boolean>>({});
   const [videoDetailOpen, setVideoDetailOpen] = useState(false);
   const [videoDetailIndex, setVideoDetailIndex] = useState<number | null>(null);
   const [videoDetailLoading, setVideoDetailLoading] = useState(false);
@@ -294,6 +296,7 @@ export default function App() {
       }
       setIdeaSuggestions(Array.isArray(data.ideas) ? data.ideas : []);
       setIdeaSuggestionsUpdatedAt(data.updatedAt || null);
+      setOpenSuggestionIndexes({});
     } catch (err: any) {
       setIdeaSuggestionsError(err.message);
       setIdeaSuggestions([]);
@@ -312,6 +315,7 @@ export default function App() {
         throw new Error(data.error || "No se pudieron cargar las ideas guardadas.");
       }
       setSavedIdeas(Array.isArray(data.ideas) ? data.ideas : []);
+      setOpenSavedIdeaIds({});
     } catch (err: any) {
       setSavedIdeasError(err.message);
       setSavedIdeas([]);
@@ -356,6 +360,10 @@ export default function App() {
     setIdeaSuggestions((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function toggleSuggestionDetails(index: number) {
+    setOpenSuggestionIndexes((prev) => ({ ...prev, [index]: !prev[index] }));
+  }
+
   async function deleteSavedIdea(id: number) {
     setIdeaDeletingId(id);
     setSavedIdeasError(null);
@@ -371,6 +379,10 @@ export default function App() {
     } finally {
       setIdeaDeletingId(null);
     }
+  }
+
+  function toggleSavedIdeaDetails(id: number) {
+    setOpenSavedIdeaIds((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
   async function validateIdea() {
@@ -760,10 +772,17 @@ export default function App() {
                   <div className="idea-grid">
                     {ideaSuggestions.map((idea, index) => {
                       const score = formatScore(idea.score);
+                      const isOpen = !!openSuggestionIndexes[index];
                       return (
-                        <article key={`${idea.titulo}-${index}`} className="idea-card">
+                        <article
+                          key={`${idea.titulo}-${index}`}
+                          className={`idea-card ${isOpen ? "is-open" : ""}`}
+                        >
                           <div className="idea-card__header">
-                            <span className="score-pill">{score !== null ? `${score} pts` : "—"}</span>
+                            <div className="idea-card__summary">
+                              <span className="score-pill">{score !== null ? `${score} pts` : "—"}</span>
+                              <h4>{idea.titulo}</h4>
+                            </div>
                             <div className="idea-card__actions">
                               <button
                                 className="ghost-button"
@@ -781,15 +800,26 @@ export default function App() {
                               >
                                 Descartar
                               </button>
+                              <button
+                                className="ghost-button subtle"
+                                type="button"
+                                onClick={() => toggleSuggestionDetails(index)}
+                                aria-expanded={isOpen}
+                              >
+                                {isOpen ? "Ocultar" : "Ver detalles"}
+                              </button>
                             </div>
                           </div>
-                          <h4>{idea.titulo}</h4>
-                          <p className="muted">{idea.angulo || "Ángulo pendiente de definir."}</p>
-                          <p className="muted">Razón: {idea.razon || "—"}</p>
-                          <div className="idea-meta">
-                            <span>Esfuerzo: {idea.esfuerzo || "medio"}</span>
-                            <span>CTA: {idea.cta || "n/a"}</span>
-                          </div>
+                          {isOpen ? (
+                            <div className="idea-card__details">
+                              <p className="muted">{idea.angulo || "Ángulo pendiente de definir."}</p>
+                              <p className="muted">Razón: {idea.razon || "—"}</p>
+                              <div className="idea-meta">
+                                <span>Esfuerzo: {idea.esfuerzo || "medio"}</span>
+                                <span>CTA: {idea.cta || "n/a"}</span>
+                              </div>
+                            </div>
+                          ) : null}
                         </article>
                       );
                     })}
@@ -897,26 +927,43 @@ export default function App() {
                   <div className="idea-grid">
                     {savedIdeas.map((idea: any) => {
                       const score = formatScore(idea.score);
+                      const isOpen = !!openSavedIdeaIds[idea.id];
                       return (
-                        <article key={idea.id} className="idea-card saved">
+                        <article key={idea.id} className={`idea-card saved ${isOpen ? "is-open" : ""}`}>
                           <div className="idea-card__header">
-                            <span className="score-pill">{score !== null ? `${score} pts` : "—"}</span>
-                            <button
-                              className="ghost-button subtle"
-                              type="button"
-                              onClick={() => deleteSavedIdea(idea.id)}
-                              disabled={ideaDeletingId === idea.id}
-                            >
-                              {ideaDeletingId === idea.id ? "Eliminando..." : "Eliminar"}
-                            </button>
+                            <div className="idea-card__summary">
+                              <span className="score-pill">{score !== null ? `${score} pts` : "—"}</span>
+                              <h4>{idea.title}</h4>
+                            </div>
+                            <div className="idea-card__actions">
+                              <button
+                                className="ghost-button subtle"
+                                type="button"
+                                onClick={() => deleteSavedIdea(idea.id)}
+                                disabled={ideaDeletingId === idea.id}
+                              >
+                                {ideaDeletingId === idea.id ? "Eliminando..." : "Eliminar"}
+                              </button>
+                              <button
+                                className="ghost-button subtle"
+                                type="button"
+                                onClick={() => toggleSavedIdeaDetails(idea.id)}
+                                aria-expanded={isOpen}
+                              >
+                                {isOpen ? "Ocultar" : "Ver detalles"}
+                              </button>
+                            </div>
                           </div>
-                          <h4>{idea.title}</h4>
-                          <p className="muted">{idea.angle || "Ángulo pendiente de definir."}</p>
-                          <p className="muted">Razón: {idea.reason || "—"}</p>
-                          <div className="idea-meta">
-                            <span>Esfuerzo: {idea.effort || "medio"}</span>
-                            <span>CTA: {idea.cta || "n/a"}</span>
-                          </div>
+                          {isOpen ? (
+                            <div className="idea-card__details">
+                              <p className="muted">{idea.angle || "Ángulo pendiente de definir."}</p>
+                              <p className="muted">Razón: {idea.reason || "—"}</p>
+                              <div className="idea-meta">
+                                <span>Esfuerzo: {idea.effort || "medio"}</span>
+                                <span>CTA: {idea.cta || "n/a"}</span>
+                              </div>
+                            </div>
+                          ) : null}
                         </article>
                       );
                     })}

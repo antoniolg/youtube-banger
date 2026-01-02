@@ -1,21 +1,21 @@
 :root {
-  --ink: #1b1b1f;
-  --ink-soft: #4d4a46;
-  --paper: #f5f1ea;
-  --paper-deep: #ebe3d8;
+  --ink: #14161b;
+  --ink-soft: #47505a;
+  --paper: #f7f8fb;
+  --paper-deep: #ecf0f5;
   --surface: #ffffff;
-  --accent: #0c6b64;
-  --accent-dark: #074741;
-  --accent-warm: #b35c35;
-  --accent-warm-dark: #7f3c20;
-  --sun: #f0bf6b;
-  --shadow: rgba(18, 16, 14, 0.14);
-  --radius-lg: 22px;
-  --radius-md: 16px;
+  --accent: #1f5ed8;
+  --accent-dark: #1847a7;
+  --accent-warm: #f2994a;
+  --accent-warm-dark: #c26b24;
+  --sun: #f2c674;
+  --shadow: rgba(24, 32, 46, 0.12);
+  --radius-lg: 18px;
+  --radius-md: 14px;
   --radius-sm: 10px;
-  --transition: 220ms cubic-bezier(0.16, 0.84, 0.44, 1);
+  --transition: 200ms cubic-bezier(0.16, 0.84, 0.44, 1);
   --max-width: 1280px;
-  font-family: "Newsreader", serif;
+  font-family: "Bricolage Grotesque", sans-serif;
   color: var(--ink);
   background: var(--paper);
 }
@@ -51,25 +51,27 @@ p {
 .hero {
   position: relative;
   overflow: hidden;
-  padding: 5rem 6vw 3.8rem;
-  background: radial-gradient(circle at top left, #fff6e8 0%, #f3e4d1 38%, #e4d4c3 68%, #d9c9ba 100%);
+  padding: 5rem 0 3.8rem;
+  background: linear-gradient(135deg, #f9fbff 0%, #eef2f8 45%, #e6ebf3 100%);
 }
 
 .hero__texture {
   position: absolute;
   inset: 0;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.6' numOctaves='2' stitchTiles='stitch'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='0.1'/></svg>");
-  mix-blend-mode: multiply;
+  background-image: radial-gradient(circle at 20% 20%, rgba(31, 94, 216, 0.08), transparent 40%),
+    radial-gradient(circle at 80% 10%, rgba(242, 153, 74, 0.08), transparent 45%),
+    radial-gradient(circle at 70% 80%, rgba(31, 94, 216, 0.06), transparent 50%);
+  mix-blend-mode: normal;
   pointer-events: none;
 }
 
 .hero__grid {
   position: absolute;
   inset: 0;
-  background-image: linear-gradient(transparent 0 59px, rgba(27, 27, 31, 0.08) 60px),
-    linear-gradient(90deg, transparent 0 59px, rgba(27, 27, 31, 0.08) 60px);
+  background-image: linear-gradient(transparent 0 59px, rgba(20, 22, 27, 0.05) 60px),
+    linear-gradient(90deg, transparent 0 59px, rgba(20, 22, 27, 0.05) 60px);
   background-size: 60px 60px;
-  opacity: 0.2;
+  opacity: 0.18;
   pointer-events: none;
 }
 
@@ -79,6 +81,7 @@ p {
   max-width: var(--max-width);
   width: min(var(--max-width), 100%);
   margin: 0 auto;
+  padding: 0 clamp(1.5rem, 6vw, 4rem);
   display: grid;
   gap: 1.4rem;
 }
@@ -113,7 +116,7 @@ p {
   border-radius: var(--radius-md);
   border: 1px solid rgba(27, 27, 31, 0.12);
   box-shadow: 0 24px 50px -40px var(--shadow);
-  max-width: 760px;
+  max-width: var(--max-width);
 }
 
 .input-group {
@@ -140,26 +143,26 @@ p {
 
 .input-group input:focus {
   outline: none;
-  border-color: rgba(12, 107, 100, 0.5);
-  box-shadow: 0 0 0 3px rgba(12, 107, 100, 0.12);
+  border-color: rgba(31, 94, 216, 0.5);
+  box-shadow: 0 0 0 3px rgba(31, 94, 216, 0.12);
 }
 
 button {
   border: none;
   border-radius: 12px;
   padding: 0.85rem 1.6rem;
-  background: linear-gradient(135deg, var(--accent), #12847a);
+  background: linear-gradient(135deg, var(--accent), #3a7bff);
   color: white;
   font-family: "Bricolage Grotesque", sans-serif;
   font-size: 0.98rem;
   cursor: pointer;
-  box-shadow: 0 16px 30px -22px rgba(12, 107, 100, 0.8);
+  box-shadow: 0 16px 30px -22px rgba(31, 94, 216, 0.6);
   transition: transform var(--transition), box-shadow var(--transition), filter var(--transition);
 }
 
 button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 20px 36px -24px rgba(12, 107, 100, 0.7);
+  box-shadow: 0 20px 36px -24px rgba(31, 94, 216, 0.55);
   filter: brightness(1.02);
 }
 
@@ -170,13 +173,13 @@ button:disabled {
 }
 
 button:focus-visible {
-  outline: 2px solid rgba(12, 107, 100, 0.6);
+  outline: 2px solid rgba(31, 94, 216, 0.6);
   outline-offset: 2px;
 }
 
 .error {
-  background: rgba(179, 92, 53, 0.1);
-  border: 1px solid rgba(179, 92, 53, 0.3);
+  background: rgba(242, 153, 74, 0.1);
+  border: 1px solid rgba(242, 153, 74, 0.3);
   padding: 0.8rem 1rem;
   border-radius: var(--radius-sm);
 }
@@ -184,37 +187,37 @@ button:focus-visible {
 .layout {
   display: grid;
   gap: 2rem;
-  padding: 2.8rem 6vw 4rem;
+  padding: 2.8rem clamp(1.5rem, 6vw, 4rem) 4rem;
   width: min(var(--max-width), 100%);
   margin: 0 auto;
 }
 
 .panel {
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.95);
   border-radius: var(--radius-lg);
   padding: 1.8rem;
-  box-shadow: 0 28px 60px -45px var(--shadow);
+  box-shadow: 0 18px 38px -30px var(--shadow);
   border: 1px solid rgba(27, 27, 31, 0.08);
   position: relative;
 }
 
 .panel.focus {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(232, 244, 241, 0.65));
-  border: 1px solid rgba(12, 107, 100, 0.25);
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(31, 94, 216, 0.18);
 }
 
 .panel.summary {
-  border: 1px solid rgba(179, 92, 53, 0.25);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(246, 233, 220, 0.75));
+  border: 1px solid rgba(31, 94, 216, 0.2);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .panel.actions {
-  border: 1px solid rgba(12, 107, 100, 0.2);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(230, 244, 240, 0.7));
+  border: 1px solid rgba(31, 94, 216, 0.18);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .action-button {
-  background: rgba(12, 107, 100, 0.12);
+  background: rgba(31, 94, 216, 0.12);
   color: var(--accent-dark);
   font-size: 0.82rem;
   padding: 0.5rem 1rem;
@@ -235,7 +238,7 @@ button:focus-visible {
 
 .action-button.is-loading {
   padding-right: 2.1rem;
-  background: rgba(12, 107, 100, 0.2);
+  background: rgba(31, 94, 216, 0.2);
 }
 
 .action-button.is-loading::after {
@@ -247,8 +250,8 @@ button:focus-visible {
   height: 0.7rem;
   margin-top: -0.35rem;
   border-radius: 50%;
-  border: 2px solid rgba(12, 107, 100, 0.35);
-  border-top-color: rgba(12, 107, 100, 0.9);
+  border: 2px solid rgba(31, 94, 216, 0.35);
+  border-top-color: rgba(31, 94, 216, 0.9);
   animation: spin 0.8s linear infinite;
 }
 
@@ -268,7 +271,7 @@ button:focus-visible {
 }
 
 .loading-card {
-  border: 1px dashed rgba(12, 107, 100, 0.25);
+  border: 1px dashed rgba(31, 94, 216, 0.25);
   border-radius: var(--radius-md);
   padding: 1rem;
   background: rgba(255, 255, 255, 0.7);
@@ -286,8 +289,8 @@ button:focus-visible {
   width: 0.9rem;
   height: 0.9rem;
   border-radius: 999px;
-  border: 2px solid rgba(12, 107, 100, 0.3);
-  border-top-color: rgba(12, 107, 100, 0.9);
+  border: 2px solid rgba(31, 94, 216, 0.3);
+  border-top-color: rgba(31, 94, 216, 0.9);
   animation: spin 0.8s linear infinite;
   flex: 0 0 auto;
 }
@@ -301,9 +304,9 @@ button:focus-visible {
   border-radius: 999px;
   background: linear-gradient(
     90deg,
-    rgba(12, 107, 100, 0.15),
-    rgba(12, 107, 100, 0.45),
-    rgba(12, 107, 100, 0.15)
+    rgba(31, 94, 216, 0.15),
+    rgba(31, 94, 216, 0.45),
+    rgba(31, 94, 216, 0.15)
   );
   background-size: 200% 100%;
   animation: shimmer 1.4s ease infinite;
@@ -319,9 +322,9 @@ button:focus-visible {
   font-size: 0.72rem;
   padding: 0.2rem 0.5rem;
   border-radius: 999px;
-  background: rgba(12, 107, 100, 0.12);
+  background: rgba(31, 94, 216, 0.12);
   color: var(--accent-dark);
-  border: 1px solid rgba(12, 107, 100, 0.2);
+  border: 1px solid rgba(31, 94, 216, 0.2);
 }
 
 .loading-hint {
@@ -358,8 +361,8 @@ button:focus-visible {
   margin-top: 1rem;
   padding: 0.9rem 1rem;
   border-radius: var(--radius-md);
-  background: rgba(179, 92, 53, 0.12);
-  border: 1px solid rgba(179, 92, 53, 0.3);
+  background: rgba(242, 153, 74, 0.12);
+  border: 1px solid rgba(242, 153, 74, 0.3);
   font-weight: 600;
 }
 
@@ -387,7 +390,7 @@ button:focus-visible {
   align-items: center;
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
-  background: rgba(12, 107, 100, 0.18);
+  background: rgba(31, 94, 216, 0.18);
   color: var(--accent-dark);
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -419,13 +422,13 @@ button:focus-visible {
 }
 
 .panel.plan {
-  border: 1px solid rgba(12, 107, 100, 0.18);
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(229, 240, 238, 0.78));
+  border: 1px solid rgba(31, 94, 216, 0.18);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .panel.ideas {
-  border: 1px solid rgba(179, 92, 53, 0.18);
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(245, 233, 221, 0.75));
+  border: 1px solid rgba(242, 153, 74, 0.2);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .ideas-layout {
@@ -481,10 +484,28 @@ button:focus-visible {
   flex-wrap: wrap;
 }
 
+.idea-card__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1 1 auto;
+  min-width: 200px;
+}
+
+.idea-card__summary h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .idea-card__actions {
   display: flex;
   gap: 0.4rem;
   flex-wrap: wrap;
+}
+
+.idea-card__details {
+  display: grid;
+  gap: 0.4rem;
 }
 
 .idea-meta {
@@ -513,7 +534,7 @@ button:focus-visible {
   border: 1px solid rgba(27, 27, 31, 0.15);
   border-radius: var(--radius-md);
   padding: 0.7rem;
-  font-family: "Newsreader", serif;
+  font-family: "Bricolage Grotesque", sans-serif;
   background: rgba(255, 255, 255, 0.85);
 }
 
@@ -522,12 +543,12 @@ button:focus-visible {
 .notes-area:focus,
 .chat-input textarea:focus {
   outline: none;
-  border-color: rgba(12, 107, 100, 0.5);
-  box-shadow: 0 0 0 3px rgba(12, 107, 100, 0.12);
+  border-color: rgba(31, 94, 216, 0.5);
+  box-shadow: 0 0 0 3px rgba(31, 94, 216, 0.12);
 }
 
 .validation-card {
-  border: 1px dashed rgba(12, 107, 100, 0.3);
+  border: 1px dashed rgba(31, 94, 216, 0.3);
   border-radius: var(--radius-md);
   padding: 1rem;
   background: rgba(255, 255, 255, 0.85);
@@ -586,7 +607,7 @@ button:focus-visible {
 
 .ghost-button {
   background: transparent;
-  border: 1px solid rgba(12, 107, 100, 0.28);
+  border: 1px solid rgba(31, 94, 216, 0.28);
   color: var(--accent-dark);
   padding: 0.35rem 0.8rem;
   font-size: 0.75rem;
@@ -663,7 +684,7 @@ button:focus-visible {
   border-radius: var(--radius-md);
   border: 1px solid rgba(27, 27, 31, 0.12);
   padding: 0.7rem;
-  font-family: "Newsreader", serif;
+  font-family: "Bricolage Grotesque", sans-serif;
 }
 
 .chat {
@@ -682,8 +703,8 @@ button:focus-visible {
 }
 
 .chat-message.user {
-  background: rgba(12, 107, 100, 0.12);
-  border-color: rgba(12, 107, 100, 0.25);
+  background: rgba(31, 94, 216, 0.12);
+  border-color: rgba(31, 94, 216, 0.25);
 }
 
 .chat-input {
@@ -696,7 +717,7 @@ button:focus-visible {
   border-radius: var(--radius-md);
   border: 1px solid rgba(27, 27, 31, 0.12);
   padding: 0.7rem;
-  font-family: "Newsreader", serif;
+  font-family: "Bricolage Grotesque", sans-serif;
 }
 
 .panel__header {
@@ -734,13 +755,13 @@ button:focus-visible {
   padding: 0.8rem 1rem;
   width: 100%;
   text-align: left;
-  font-family: "Newsreader", serif;
+  font-family: "Bricolage Grotesque", sans-serif;
   color: var(--ink);
 }
 
 .run-card.active {
   border-color: var(--accent);
-  box-shadow: 0 14px 30px -20px rgba(12, 107, 100, 0.45);
+  box-shadow: 0 14px 30px -20px rgba(31, 94, 216, 0.45);
 }
 
 .run-card__query {
@@ -760,10 +781,10 @@ button:focus-visible {
 }
 
 .stat {
-  background: rgba(12, 107, 100, 0.08);
+  background: rgba(31, 94, 216, 0.08);
   padding: 1rem 1.2rem;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(12, 107, 100, 0.18);
+  border: 1px solid rgba(31, 94, 216, 0.18);
 }
 
 .stat p {
@@ -864,7 +885,7 @@ button:focus-visible {
 }
 
 .pill {
-  background: rgba(179, 92, 53, 0.12);
+  background: rgba(242, 153, 74, 0.12);
   color: var(--accent-dark);
   font-family: "Bricolage Grotesque", sans-serif;
   border-radius: 999px;
@@ -893,17 +914,17 @@ button:focus-visible {
   justify-content: center;
   padding: 0.8rem 1.4rem;
   border-radius: 999px;
-  background: rgba(12, 107, 100, 0.12);
+  background: rgba(31, 94, 216, 0.12);
   color: var(--accent-dark);
   font-family: "Bricolage Grotesque", sans-serif;
   text-decoration: none;
-  border: 1px solid rgba(12, 107, 100, 0.3);
+  border: 1px solid rgba(31, 94, 216, 0.3);
   transition: transform var(--transition), box-shadow var(--transition);
 }
 
 .oauth__link:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 22px -18px rgba(12, 107, 100, 0.5);
+  box-shadow: 0 10px 22px -18px rgba(31, 94, 216, 0.5);
 }
 
 .analytics-grid {
@@ -970,7 +991,7 @@ button:focus-visible {
 }
 
 .score-pill {
-  background: rgba(12, 107, 100, 0.15);
+  background: rgba(31, 94, 216, 0.15);
   color: var(--accent-dark);
   font-family: "Bricolage Grotesque", sans-serif;
   padding: 0.35rem 0.7rem;
@@ -1031,8 +1052,8 @@ button:focus-visible {
 .gap-pill {
   padding: 0.4rem 0.8rem;
   border-radius: 999px;
-  background: rgba(179, 92, 53, 0.16);
-  border: 1px solid rgba(179, 92, 53, 0.35);
+  background: rgba(242, 153, 74, 0.16);
+  border: 1px solid rgba(242, 153, 74, 0.35);
   font-size: 0.85rem;
 }
 
@@ -1099,8 +1120,8 @@ button:focus-visible {
 }
 
 .filter {
-  background: rgba(12, 107, 100, 0.12);
-  border: 1px solid rgba(12, 107, 100, 0.2);
+  background: rgba(31, 94, 216, 0.12);
+  border: 1px solid rgba(31, 94, 216, 0.2);
   color: var(--accent-dark);
   font-size: 0.85rem;
   padding: 0.4rem 0.9rem;
@@ -1109,8 +1130,8 @@ button:focus-visible {
 }
 
 .filter.active {
-  background: rgba(12, 107, 100, 0.25);
-  border-color: rgba(12, 107, 100, 0.45);
+  background: rgba(31, 94, 216, 0.25);
+  border-color: rgba(31, 94, 216, 0.45);
 }
 
 .filter:hover {
@@ -1130,12 +1151,12 @@ button:focus-visible {
 }
 
 .tag-ai {
-  background: rgba(12, 107, 100, 0.2);
+  background: rgba(31, 94, 216, 0.2);
   color: var(--accent-dark);
 }
 
 .tag-dev {
-  background: rgba(179, 92, 53, 0.15);
+  background: rgba(242, 153, 74, 0.15);
   color: var(--accent-dark);
 }
 
