@@ -123,6 +123,11 @@ export default function App() {
   const [globalLoading, setGlobalLoading] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [globalUpdatedAt, setGlobalUpdatedAt] = useState<string | null>(null);
+  const [nextDecision, setNextDecision] = useState<any>(null);
+  const [nextDecisionLoading, setNextDecisionLoading] = useState(false);
+  const [nextDecisionError, setNextDecisionError] = useState<string | null>(null);
+  const [nextDecisionUpdatedAt, setNextDecisionUpdatedAt] = useState<string | null>(null);
+  const [nextDecisionSaving, setNextDecisionSaving] = useState(false);
   const [ideaSuggestions, setIdeaSuggestions] = useState<any[]>([]);
   const [ideaSuggestionsLoading, setIdeaSuggestionsLoading] = useState(false);
   const [ideaSuggestionsError, setIdeaSuggestionsError] = useState<string | null>(null);
@@ -204,6 +209,7 @@ export default function App() {
     await fetchInsights(runId);
     fetchMonthPlan(runId);
     fetchGlobalInspiration(runId);
+    fetchNextDecision(runId);
     fetchIdeaSuggestions(runId);
     fetchSavedIdeas(runId);
   }
@@ -280,6 +286,27 @@ export default function App() {
       setGlobalInspiration(null);
     } finally {
       setGlobalLoading(false);
+    }
+  }
+
+  async function fetchNextDecision(runId: number, refresh = false) {
+    setNextDecisionLoading(true);
+    setNextDecisionError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/decision/next?runId=${runId}${refresh ? "&refresh=1" : ""}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo generar la recomendación.");
+      }
+      setNextDecision(data.decision || null);
+      setNextDecisionUpdatedAt(data.updatedAt || null);
+    } catch (err: any) {
+      setNextDecisionError(err.message);
+      setNextDecision(null);
+    } finally {
+      setNextDecisionLoading(false);
     }
   }
 
@@ -467,6 +494,39 @@ export default function App() {
     }
   }
 
+  async function saveNextDecision() {
+    if (!activeRun?.run?.id || !nextDecision) return;
+    const title = String(nextDecision.titulo || "").trim();
+    if (!title) return;
+    setNextDecisionSaving(true);
+    setSavedIdeasError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: activeRun.run.id,
+          title,
+          angle: nextDecision.angulo,
+          reason: nextDecision.razon,
+          effort: nextDecision.esfuerzo,
+          cta: nextDecision.cta,
+          score: nextDecision.score?.total ?? nextDecision.score,
+          source: "decision",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo guardar la idea.");
+      }
+      setSavedIdeas((prev) => [data.idea, ...prev]);
+    } catch (err: any) {
+      setSavedIdeasError(err.message);
+    } finally {
+      setNextDecisionSaving(false);
+    }
+  }
+
   async function openVideoDetail(index: number) {
     if (!activeRun?.run?.id || !monthPlanUpdatedAt) {
       setVideoDetailError("Regenera el plan para abrir el detalle.");
@@ -640,6 +700,12 @@ export default function App() {
     return items;
   }, [analytics, focusRatio, activeRun]);
 
+  const decisionAlreadySaved = useMemo(() => {
+    if (!nextDecision?.titulo || !savedIdeas.length) return false;
+    const title = String(nextDecision.titulo).trim().toLowerCase();
+    return savedIdeas.some((idea) => String(idea.title || "").trim().toLowerCase() === title);
+  }, [nextDecision, savedIdeas]);
+
   const alert = useMemo(() => {
     if (!focusRatio) return null;
     if (focusRatio.ratio < 0.5) {
@@ -654,7 +720,7 @@ export default function App() {
   }, [insights]);
 
   const lastInsightUpdate = useMemo(() => {
-    const dates = [overviewUpdatedAt, topicsUpdatedAt, monthPlanUpdatedAt]
+    const dates = [overviewUpdatedAt, topicsUpdatedAt, monthPlanUpdatedAt, nextDecisionUpdatedAt]
       .filter(Boolean)
       .map((value) => new Date(value as string).getTime())
       .filter((value) => Number.isFinite(value));
@@ -733,6 +799,103 @@ export default function App() {
             <p className="muted">Conecta Analytics y ejecuta una investigación para ver el resumen.</p>
           )}
           {alert ? <div className="alert-card">{alert}</div> : null}
+        </section>
+
+        <section className="panel decision">
+          <div className="panel__header">
+            <h2>Próxima decisión</h2>
+            <div className="actions-meta">
+              <span className="muted">
+                {nextDecisionUpdatedAt ? `Actualizado ${formatAge(nextDecisionUpdatedAt)}` : "Sin datos"}
+              </span>
+              <button
+                className={`action-button ${nextDecisionLoading ? "is-loading" : ""}`}
+                onClick={() => activeRun?.run?.id && fetchNextDecision(activeRun.run.id, true)}
+                disabled={nextDecisionLoading || !activeRun?.run?.id}
+                aria-busy={nextDecisionLoading}
+              >
+                {nextDecisionLoading ? "Analizando..." : "Actualizar decisión"}
+              </button>
+            </div>
+          </div>
+          <p className="muted">
+            Una única recomendación para enfocar el próximo vídeo con máximo impacto en autoridad.
+          </p>
+          {nextDecisionError ? <div className="error">{nextDecisionError}</div> : null}
+          {nextDecision ? (
+            <div className="decision-grid">
+              <div className="decision-main">
+                <div className="decision-title">
+                  <span className="score-pill">
+                    {formatScore(nextDecision.score?.total ?? nextDecision.score) ?? "—"} pts
+                  </span>
+                  <h3>{nextDecision.titulo}</h3>
+                </div>
+                <p className="muted">{nextDecision.angulo}</p>
+                <div className="decision-meta">
+                  <span>Esfuerzo: {nextDecision.esfuerzo || "medio"}</span>
+                  <span>Horas: {nextDecision.horas_estimadas ?? "n/a"}h</span>
+                  <span>Formato: {nextDecision.formato || "video largo"}</span>
+                </div>
+                <p className="muted">CTA: {nextDecision.cta || "n/a"}</p>
+                <p>{nextDecision.razon}</p>
+                <div className="decision-section">
+                  <h4>Por qué ahora</h4>
+                  <ul>
+                    {asList(nextDecision.por_que_ahora).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="decision-actions">
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={saveNextDecision}
+                    disabled={nextDecisionSaving || decisionAlreadySaved}
+                  >
+                    {decisionAlreadySaved ? "Ya guardada" : nextDecisionSaving ? "Guardando..." : "Guardar idea"}
+                  </button>
+                </div>
+              </div>
+              <div className="decision-side">
+                <div className="decision-score">
+                  <div>
+                    <p>Autoridad</p>
+                    <strong>{formatScore(nextDecision.score?.autoridad) ?? "—"}</strong>
+                  </div>
+                  <div>
+                    <p>Crecimiento</p>
+                    <strong>{formatScore(nextDecision.score?.crecimiento) ?? "—"}</strong>
+                  </div>
+                  <div>
+                    <p>Diferenciación</p>
+                    <strong>{formatScore(nextDecision.score?.diferenciacion) ?? "—"}</strong>
+                  </div>
+                </div>
+                <div className="decision-section">
+                  <h4>Riesgos</h4>
+                  <ul>
+                    {asList(nextDecision.riesgos).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="decision-section">
+                  <h4>Siguientes pasos</h4>
+                  <ul>
+                    {asList(nextDecision.siguientes_pasos).map((item: string, i: number) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : nextDecisionLoading ? (
+            <p className="muted">Calculando recomendación...</p>
+          ) : (
+            <p className="muted">Pulsa “Actualizar decisión” para obtener la recomendación.</p>
+          )}
         </section>
 
         <section className="panel ideas">
@@ -1745,6 +1908,7 @@ export default function App() {
     await Promise.all([
       fetchInsights(activeRun.run.id, true),
       fetchMonthPlan(activeRun.run.id, true),
+      fetchNextDecision(activeRun.run.id, true),
     ]);
     setInsightsRefreshing(false);
   }

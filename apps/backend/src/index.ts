@@ -419,6 +419,113 @@ app.get("/api/insights/next-actions", async (req, res) => {
   }
 });
 
+app.get("/api/decision/next", async (req, res) => {
+  try {
+    const runId = Number(req.query.runId);
+    if (!runId) return res.status(400).json({ error: "runId is required" });
+    const refresh = req.query.refresh === "1";
+
+    if (!refresh) {
+      const cached = await getCachedInsight(runId, "next-decision");
+      if (cached) {
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(runId, "next-decision", normalized);
+        }
+        return res.json({ decision: normalized, cached: true, updatedAt: cached.updatedAt });
+      }
+    }
+
+    const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [runId]);
+    if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
+
+    const videosResult = await pool.query(
+      `SELECT v.title, v.description, v.published_at, v.duration_seconds, v.view_count,
+              c.title AS channel_title
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
+       ORDER BY v.view_count DESC NULLS LAST
+       LIMIT 24`,
+      [runId, MIN_LONG_SECONDS]
+    );
+
+    const statsResult = await pool.query(
+      `SELECT COUNT(*)::int AS videos, AVG(view_count)::float8 AS avg_views, AVG(duration_seconds)::float8 AS avg_duration
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2`,
+      [runId, MIN_LONG_SECONDS]
+    );
+
+    const analytics = await safeAnalyticsSummary();
+    const topVideos = await safeAnalyticsTopVideos();
+    const focusRatio = computeFocusRatio(topVideos?.items || []);
+
+    const topicsCached = await getCachedInsight(runId, "topics");
+    const topicsSummary = topicsCached ? normalizeGeminiInsight(topicsCached.content) : null;
+
+    const savedIdeasResult = await pool.query(
+      `SELECT title, angle, reason, effort, cta, score, source
+       FROM video_ideas
+       WHERE run_id = $1
+       ORDER BY created_at DESC
+       LIMIT 12`,
+      [runId]
+    );
+
+    let suggestions = await getCachedInsight(runId, "idea-suggestions");
+    let suggestionPayload = suggestions ? normalizeGeminiInsight(suggestions.content) : null;
+    if (!suggestionPayload || !Array.isArray(suggestionPayload.ideas)) {
+      const prompt = buildIdeaSuggestionsPrompt({
+        query: runResult.rows[0].query,
+        videos: videosResult.rows,
+        topicsSummary,
+      });
+      const rawIdeas = await generateInsights(prompt, IDEA_SUGGESTIONS_SCHEMA);
+      suggestionPayload = normalizeGeminiInsight(rawIdeas);
+      await saveCachedInsight(runId, "idea-suggestions", suggestionPayload);
+    }
+
+    const candidateIdeas = [
+      ...savedIdeasResult.rows.map((idea) => ({
+        titulo: idea.title,
+        angulo: idea.angle,
+        razon: idea.reason,
+        esfuerzo: idea.effort,
+        cta: idea.cta,
+        score: idea.score,
+        source: idea.source,
+      })),
+      ...(Array.isArray(suggestionPayload?.ideas) ? suggestionPayload.ideas : []),
+    ]
+      .filter((idea) => idea?.titulo)
+      .slice(0, 12);
+
+    const prompt = buildNextDecisionPrompt({
+      run: runResult.rows[0],
+      stats: statsResult.rows[0],
+      videos: videosResult.rows,
+      analytics,
+      topVideos,
+      focusRatio,
+      topicsSummary,
+      candidates: candidateIdeas,
+      maxWeeklyHours: MAX_WEEKLY_HOURS,
+    });
+
+    const rawDecision = await generateInsights(prompt, NEXT_DECISION_SCHEMA);
+    const decision = normalizeGeminiInsight(rawDecision);
+    const updatedAt = await saveCachedInsight(runId, "next-decision", decision);
+    res.json({ decision, cached: false, updatedAt });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
 app.get("/api/plan/month", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
@@ -1389,6 +1496,132 @@ Contexto del mercado:
 
 Muestra de videos con tracción:
 ${list}`;
+}
+
+const NEXT_DECISION_SCHEMA = {
+  type: "object",
+  properties: {
+    titulo: { type: "string" },
+    angulo: { type: "string" },
+    razon: { type: "string" },
+    esfuerzo: { type: "string" },
+    horas_estimadas: { type: "number" },
+    cta: { type: "string" },
+    formato: { type: "string" },
+    score: {
+      type: "object",
+      properties: {
+        autoridad: { type: "integer", minimum: 0, maximum: 100 },
+        crecimiento: { type: "integer", minimum: 0, maximum: 100 },
+        diferenciacion: { type: "integer", minimum: 0, maximum: 100 },
+        total: { type: "integer", minimum: 0, maximum: 100 },
+      },
+      required: ["autoridad", "crecimiento", "diferenciacion", "total"],
+      additionalProperties: false,
+    },
+    por_que_ahora: { type: "array", items: { type: "string" } },
+    riesgos: { type: "array", items: { type: "string" } },
+    siguientes_pasos: { type: "array", items: { type: "string" } },
+  },
+  required: [
+    "titulo",
+    "angulo",
+    "razon",
+    "esfuerzo",
+    "horas_estimadas",
+    "cta",
+    "formato",
+    "score",
+    "por_que_ahora",
+    "riesgos",
+    "siguientes_pasos",
+  ],
+  additionalProperties: false,
+};
+
+function buildNextDecisionPrompt(payload: {
+  run: any;
+  stats: any;
+  videos: any[];
+  analytics: any;
+  topVideos: any;
+  focusRatio: any;
+  topicsSummary: any;
+  candidates: any[];
+  maxWeeklyHours: number;
+}) {
+  const marketSample = payload.videos
+    .slice(0, 16)
+    .map(
+      (video) =>
+        `- ${video.title} | ${video.channel_title} | ${video.view_count ?? "n/a"} views | ${Math.round(
+          (video.duration_seconds ?? 0) / 60
+        )} min`
+    )
+    .join("\n");
+
+  const candidateList = payload.candidates
+    .map(
+      (idea) =>
+        `- ${idea.titulo} | angulo: ${idea.angulo ?? "n/a"} | esfuerzo: ${idea.esfuerzo ?? "n/a"} | score: ${
+          idea.score ?? "n/a"
+        } | source: ${idea.source ?? "n/a"}`
+    )
+    .join("\n");
+
+  const topVideoList = (payload.topVideos?.items || [])
+    .slice(0, 6)
+    .map((item: any) => `- ${item.title} | ${item.views ?? "n/a"} views`)
+    .join("\n");
+
+  const topicText = payload.topicsSummary
+    ? JSON.stringify(payload.topicsSummary)
+    : "No hay mapa de temas aún. Deduce pilares a partir de los títulos del mercado.";
+
+  return `Eres estratega senior de YouTube en español para un canal de IA aplicada al desarrollo de software.
+Objetivo: autoridad técnica (no influencer). Debes recomendar la *próxima decisión* de contenido.
+
+Contexto del canal:
+- Tiempo disponible: ${payload.maxWeeklyHours} horas por semana.
+- Duración objetivo: 15-30 min.
+- Query base: ${payload.run.query}
+- Mercado: ${payload.stats?.videos ?? "n/a"} videos · ${Math.round((payload.stats?.avg_duration ?? 0) / 60)} min promedio.
+- Enfoque IA aplicada en top videos del canal: ${
+    payload.focusRatio ? `${payload.focusRatio.aiCount}/${payload.focusRatio.total}` : "No disponible"
+  }.
+
+Top videos del canal:
+${topVideoList || "No disponible"}
+
+Mapa de temas:
+${topicText}
+
+Muestra de mercado:
+${marketSample}
+
+Ideas candidatas (selecciona UNA):
+${candidateList || "No hay candidatos, propón una desde el mercado y gaps."}
+
+Devuelve SOLO JSON válido con esta estructura exacta:
+{
+  "titulo": "...",
+  "angulo": "...",
+  "razon": "...",
+  "esfuerzo": "bajo|medio|alto",
+  "horas_estimadas": 6,
+  "cta": "...",
+  "formato": "...",
+  "score": { "autoridad": 0, "crecimiento": 0, "diferenciacion": 0, "total": 0 },
+  "por_que_ahora": ["...","..."],
+  "riesgos": ["...","..."],
+  "siguientes_pasos": ["...","..."]
+}
+
+Reglas:
+- Prioriza autoridad y diferenciación sobre viralidad.
+- No excedas ${payload.maxWeeklyHours} horas.
+- Score total debe ser coherente con el resto.
+- Si ninguna idea encaja, genera una nueva basada en los gaps del mercado.`;
 }
 
 async function loadMonthPlanVideo(runId: number, videoIndex: number, planUpdatedAt: string) {

@@ -431,6 +431,67 @@ button:focus-visible {
   background: rgba(255, 255, 255, 0.98);
 }
 
+.panel.decision {
+  border: 1px solid rgba(31, 94, 216, 0.22);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.decision-grid {
+  display: grid;
+  gap: 1.4rem;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr);
+}
+
+.decision-title {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.decision-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  margin: 0.6rem 0;
+}
+
+.decision-section {
+  margin-top: 1rem;
+}
+
+.decision-section h4 {
+  margin-bottom: 0.4rem;
+}
+
+.decision-score {
+  display: grid;
+  gap: 0.6rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(31, 94, 216, 0.18);
+  padding: 0.9rem;
+  background: rgba(31, 94, 216, 0.08);
+}
+
+.decision-score p {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.decision-score strong {
+  font-size: 1.4rem;
+  font-family: "Bricolage Grotesque", sans-serif;
+}
+
+.decision-actions {
+  margin-top: 1rem;
+}
+
 .ideas-layout {
   display: grid;
   gap: 1.5rem;
@@ -1197,6 +1258,10 @@ button:focus-visible {
   }
 
   .global-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .decision-grid {
     grid-template-columns: 1fr;
   }
 }
