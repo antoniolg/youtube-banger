@@ -146,6 +146,16 @@ export default function App() {
   const [ideaSavingValidation, setIdeaSavingValidation] = useState(false);
   const [openSuggestionIndexes, setOpenSuggestionIndexes] = useState<Record<number, boolean>>({});
   const [openSavedIdeaIds, setOpenSavedIdeaIds] = useState<Record<number, boolean>>({});
+  const [ideaDetailOpen, setIdeaDetailOpen] = useState(false);
+  const [ideaDetailLoading, setIdeaDetailLoading] = useState(false);
+  const [ideaDetailError, setIdeaDetailError] = useState<string | null>(null);
+  const [ideaDetail, setIdeaDetail] = useState<any>(null);
+  const [ideaDetailBriefLoading, setIdeaDetailBriefLoading] = useState(false);
+  const [ideaDetailBriefUpdatedAt, setIdeaDetailBriefUpdatedAt] = useState<string | null>(null);
+  const [ideaDetailNotes, setIdeaDetailNotes] = useState("");
+  const [ideaNotesSaving, setIdeaNotesSaving] = useState(false);
+  const [ideaChatInput, setIdeaChatInput] = useState("");
+  const [ideaChatSending, setIdeaChatSending] = useState(false);
   const [videoDetailOpen, setVideoDetailOpen] = useState(false);
   const [videoDetailIndex, setVideoDetailIndex] = useState<number | null>(null);
   const [videoDetailLoading, setVideoDetailLoading] = useState(false);
@@ -155,6 +165,8 @@ export default function App() {
   const [notesSaving, setNotesSaving] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  const [videoBriefLoading, setVideoBriefLoading] = useState(false);
+  const [videoBriefUpdatedAt, setVideoBriefUpdatedAt] = useState<string | null>(null);
   const [insightsRefreshing, setInsightsRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
   const [topVideos, setTopVideos] = useState<any>(null);
@@ -494,6 +506,106 @@ export default function App() {
     }
   }
 
+  async function openIdeaDetail(id: number) {
+    setIdeaDetailOpen(true);
+    setIdeaDetailLoading(true);
+    setIdeaDetailError(null);
+    setIdeaDetailBriefUpdatedAt(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas/${id}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo cargar el detalle.");
+      }
+      setIdeaDetail({ ...data.idea, brief: data.brief });
+      setIdeaDetailBriefUpdatedAt(data.briefUpdatedAt || null);
+      setIdeaDetailNotes(data.notes || "");
+    } catch (err: any) {
+      setIdeaDetailError(err.message);
+      setIdeaDetail(null);
+    } finally {
+      setIdeaDetailLoading(false);
+    }
+  }
+
+  function closeIdeaDetail() {
+    setIdeaDetailOpen(false);
+    setIdeaDetail(null);
+    setIdeaDetailError(null);
+    setIdeaDetailBriefUpdatedAt(null);
+    setIdeaDetailNotes("");
+    setIdeaChatInput("");
+  }
+
+  async function generateIdeaBrief(refresh = true) {
+    if (!ideaDetail?.id) return;
+    setIdeaDetailBriefLoading(true);
+    setIdeaDetailError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/ideas/${ideaDetail.id}/brief${refresh ? "?refresh=1" : ""}`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo generar el brief.");
+      }
+      setIdeaDetail((prev: any) => ({ ...prev, brief: data.brief }));
+      setIdeaDetailBriefUpdatedAt(data.updatedAt || null);
+    } catch (err: any) {
+      setIdeaDetailError(err.message);
+    } finally {
+      setIdeaDetailBriefLoading(false);
+    }
+  }
+
+  async function saveIdeaNotes() {
+    if (!ideaDetail?.id) return;
+    setIdeaNotesSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas/${ideaDetail.id}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: ideaDetailNotes }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudieron guardar las notas.");
+    } catch (err: any) {
+      setIdeaDetailError(err.message);
+    } finally {
+      setIdeaNotesSaving(false);
+    }
+  }
+
+  async function sendIdeaChatMessage() {
+    if (!ideaDetail?.id || !ideaChatInput.trim()) return;
+    const message = ideaChatInput.trim();
+    setIdeaChatSending(true);
+    setIdeaChatInput("");
+    const nextMessages = [
+      ...(Array.isArray(ideaDetail?.messages) ? ideaDetail.messages : []),
+      { role: "user", content: message },
+    ];
+    setIdeaDetail((prev: any) => ({ ...prev, messages: nextMessages }));
+    try {
+      const res = await fetch(`${API_BASE}/api/ideas/${ideaDetail.id}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo generar respuesta.");
+      setIdeaDetail((prev: any) => ({
+        ...prev,
+        messages: [...nextMessages, { role: "assistant", content: data.reply }],
+      }));
+    } catch (err: any) {
+      setIdeaDetailError(err.message);
+    } finally {
+      setIdeaChatSending(false);
+    }
+  }
+
   async function saveNextDecision() {
     if (!activeRun?.run?.id || !nextDecision) return;
     const title = String(nextDecision.titulo || "").trim();
@@ -549,6 +661,7 @@ export default function App() {
       }
       setVideoDetail(data);
       setVideoNotes(data.notes || "");
+      setVideoBriefUpdatedAt(data.briefUpdatedAt || null);
     } catch (err: any) {
       setVideoDetailError(err.message);
       setVideoDetail(null);
@@ -563,6 +676,7 @@ export default function App() {
     setVideoDetail(null);
     setVideoDetailError(null);
     setChatInput("");
+    setVideoBriefUpdatedAt(null);
   }
 
   async function saveVideoNotes() {
@@ -619,6 +733,31 @@ export default function App() {
       setVideoDetailError(err.message);
     } finally {
       setChatSending(false);
+    }
+  }
+
+  async function generateVideoBrief(refresh = true) {
+    if (!activeRun?.run?.id || videoDetailIndex === null || !monthPlanUpdatedAt) return;
+    setVideoBriefLoading(true);
+    setVideoDetailError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/plan/month/video/brief${refresh ? "?refresh=1" : ""}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: activeRun.run.id,
+          index: videoDetailIndex,
+          planUpdatedAt: monthPlanUpdatedAt,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo generar el brief.");
+      setVideoDetail((prev: any) => ({ ...prev, brief: data.brief }));
+      setVideoBriefUpdatedAt(data.updatedAt || null);
+    } catch (err: any) {
+      setVideoDetailError(err.message);
+    } finally {
+      setVideoBriefLoading(false);
     }
   }
 
@@ -1106,6 +1245,13 @@ export default function App() {
                                 disabled={ideaDeletingId === idea.id}
                               >
                                 {ideaDeletingId === idea.id ? "Eliminando..." : "Eliminar"}
+                              </button>
+                              <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => openIdeaDetail(idea.id)}
+                              >
+                                Detalle
                               </button>
                               <button
                                 className="ghost-button subtle"
@@ -1816,6 +1962,82 @@ export default function App() {
                 </div>
 
                 <div className="detail-block">
+                  <div className="detail-header-row">
+                    <h4>Brief del vídeo</h4>
+                    <div className="actions-meta">
+                      <span className="muted">
+                        {videoBriefUpdatedAt ? `Actualizado ${formatAge(videoBriefUpdatedAt)}` : "Sin brief"}
+                      </span>
+                      <button
+                        className={`action-button ${videoBriefLoading ? "is-loading" : ""}`}
+                        onClick={() => generateVideoBrief(true)}
+                        disabled={videoBriefLoading}
+                      >
+                        {videoBriefLoading ? "Generando..." : "Generar brief"}
+                      </button>
+                    </div>
+                  </div>
+                  {videoDetail?.brief ? (
+                    <div className="brief-grid">
+                      <div>
+                        <h4>Hook</h4>
+                        <p>{videoDetail.brief.hook}</p>
+                      </div>
+                      <div>
+                        <h4>Estructura</h4>
+                        <ul>
+                          {asList(videoDetail.brief.estructura).map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4>Puntos clave</h4>
+                        <ul>
+                          {asList(videoDetail.brief.puntos_clave).map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4>Ejemplo práctico</h4>
+                        <p className="muted">{videoDetail.brief.ejemplo_practico}</p>
+                      </div>
+                      <div>
+                        <h4>Recursos</h4>
+                        <ul>
+                          {asList(videoDetail.brief.recursos).map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4>Título sugerido</h4>
+                        <p>{videoDetail.brief.titulo_youtube}</p>
+                      </div>
+                      <div>
+                        <h4>Idea miniatura</h4>
+                        <p className="muted">{videoDetail.brief.miniatura_idea}</p>
+                      </div>
+                      <div>
+                        <h4>Checklist autoridad</h4>
+                        <ul>
+                          {asList(videoDetail.brief.autoridad_checklist).map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4>CTA recomendado</h4>
+                        <p className="muted">{videoDetail.brief.cta}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="muted">Genera el brief cuando quieras desarrollar este vídeo.</p>
+                  )}
+                </div>
+
+                <div className="detail-block">
                   <h4>Chat de guion</h4>
                   <div className="chat">
                     {(videoDetail.messages || []).map((msg: any, index: number) => (
@@ -1843,6 +2065,162 @@ export default function App() {
               </div>
             ) : (
               <p className="muted">Selecciona un vídeo del plan para abrir el detalle.</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+      {ideaDetailOpen ? (
+        <div className="detail-overlay" onClick={closeIdeaDetail}>
+          <div className="detail-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="detail-header">
+              <div>
+                <p className="detail-label">Idea guardada</p>
+                <h3>{ideaDetail?.title || "Idea"}</h3>
+              </div>
+              <button className="ghost-button" onClick={closeIdeaDetail}>
+                Cerrar
+              </button>
+            </div>
+            {ideaDetailError ? <div className="error">{ideaDetailError}</div> : null}
+            {ideaDetailLoading ? (
+              <p className="muted">Cargando detalle...</p>
+            ) : ideaDetail ? (
+              <div className="detail-body">
+                <div className="detail-block">
+                  <h4>Contexto</h4>
+                  <p className="muted">{ideaDetail.angle || "Ángulo pendiente de definir."}</p>
+                  <div className="detail-meta">
+                    <span>Esfuerzo: {ideaDetail.effort || "medio"}</span>
+                    <span>CTA: {ideaDetail.cta || "n/a"}</span>
+                    <span>Score: {formatScore(ideaDetail.score) ?? "—"}</span>
+                  </div>
+                  <p className="muted">Razón: {ideaDetail.reason || "—"}</p>
+                </div>
+
+                <div className="detail-block">
+                  <div className="detail-header-row">
+                    <h4>Brief del vídeo</h4>
+                    <div className="actions-meta">
+                      <span className="muted">
+                        {ideaDetailBriefUpdatedAt ? `Actualizado ${formatAge(ideaDetailBriefUpdatedAt)}` : "Sin brief"}
+                      </span>
+                      <button
+                        className={`action-button ${ideaDetailBriefLoading ? "is-loading" : ""}`}
+                        onClick={() => generateIdeaBrief(true)}
+                        disabled={ideaDetailBriefLoading}
+                      >
+                        {ideaDetailBriefLoading ? "Generando..." : "Generar brief"}
+                      </button>
+                    </div>
+                  </div>
+                  {ideaDetail.brief ? (
+                    <div className="brief-grid">
+                      <div>
+                        <h4>Hook</h4>
+                        <p>{ideaDetail.brief.hook}</p>
+                      </div>
+                      <div>
+                        <h4>Estructura</h4>
+                        <ul>
+                          {asList(ideaDetail.brief.estructura).map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4>Puntos clave</h4>
+                        <ul>
+                          {asList(ideaDetail.brief.puntos_clave).map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4>Ejemplo práctico</h4>
+                        <p className="muted">{ideaDetail.brief.ejemplo_practico}</p>
+                      </div>
+                      <div>
+                        <h4>Recursos</h4>
+                        <ul>
+                          {asList(ideaDetail.brief.recursos).map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4>Título sugerido</h4>
+                        <p>{ideaDetail.brief.titulo_youtube}</p>
+                      </div>
+                      <div>
+                        <h4>Idea miniatura</h4>
+                        <p className="muted">{ideaDetail.brief.miniatura_idea}</p>
+                      </div>
+                      <div>
+                        <h4>Checklist autoridad</h4>
+                        <ul>
+                          {asList(ideaDetail.brief.autoridad_checklist).map((item: string, i: number) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4>CTA recomendado</h4>
+                        <p className="muted">{ideaDetail.brief.cta}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="muted">Genera el brief cuando quieras desarrollar la idea.</p>
+                  )}
+                </div>
+
+                <div className="detail-block">
+                  <div className="detail-header-row">
+                    <h4>Notas</h4>
+                    <button
+                      className={`action-button ${ideaNotesSaving ? "is-loading" : ""}`}
+                      onClick={saveIdeaNotes}
+                      disabled={ideaNotesSaving}
+                    >
+                      {ideaNotesSaving ? "Guardando..." : "Guardar notas"}
+                    </button>
+                  </div>
+                  <textarea
+                    className="notes-area"
+                    rows={6}
+                    value={ideaDetailNotes}
+                    onChange={(event) => setIdeaDetailNotes(event.target.value)}
+                    placeholder="Apunta ideas, ejemplos, recursos o puntos clave..."
+                  />
+                </div>
+
+                <div className="detail-block">
+                  <h4>Chat de guion</h4>
+                  <div className="chat">
+                    {(ideaDetail.messages || []).map((msg: any, index: number) => (
+                      <div key={index} className={`chat-message ${msg.role === "user" ? "user" : "assistant"}`}>
+                        <p>{msg.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="chat-input">
+                    <textarea
+                      rows={3}
+                      value={ideaChatInput}
+                      onChange={(event) => setIdeaChatInput(event.target.value)}
+                      placeholder="Pide el guion, mejora el hook, estructura, etc."
+                    />
+                    <button
+                      className={`action-button ${ideaChatSending ? "is-loading" : ""}`}
+                      onClick={sendIdeaChatMessage}
+                      disabled={ideaChatSending}
+                    >
+                      {ideaChatSending ? "Enviando..." : "Enviar"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="muted">Selecciona una idea guardada.</p>
             )}
           </div>
         </div>

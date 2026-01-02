@@ -98,6 +98,21 @@ CREATE TABLE IF NOT EXISTS video_ideas (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS idea_ideation_notes (
+  idea_id INT NOT NULL REFERENCES video_ideas(id) ON DELETE CASCADE,
+  notes TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (idea_id)
+);
+
+CREATE TABLE IF NOT EXISTS idea_ideation_messages (
+  id SERIAL PRIMARY KEY,
+  idea_id INT NOT NULL REFERENCES video_ideas(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS oauth_tokens (
   provider TEXT PRIMARY KEY,
   access_token TEXT,

@@ -818,6 +818,182 @@ app.post("/api/ideas/validate", async (req, res) => {
   }
 });
 
+app.get("/api/ideas/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: "id is required" });
+    const result = await pool.query(
+      `SELECT id, run_id, title, angle, reason, effort, cta, score, source, created_at
+       FROM video_ideas
+       WHERE id = $1`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: "idea not found" });
+    const idea = result.rows[0];
+    const cached = await getCachedInsight(idea.run_id, `idea-brief:${idea.id}`);
+    const brief = cached ? normalizeGeminiInsight(cached.content) : null;
+    const notesResult = await pool.query(
+      `SELECT notes FROM idea_ideation_notes WHERE idea_id = $1`,
+      [idea.id]
+    );
+    const messagesResult = await pool.query(
+      `SELECT role, content, created_at
+       FROM idea_ideation_messages
+       WHERE idea_id = $1
+       ORDER BY id ASC`,
+      [idea.id]
+    );
+    res.json({
+      idea,
+      brief,
+      briefUpdatedAt: cached?.updatedAt || null,
+      notes: notesResult.rows[0]?.notes || "",
+      messages: messagesResult.rows || [],
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.post("/api/ideas/:id/brief", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: "id is required" });
+    const refresh = req.query.refresh === "1";
+
+    const ideaResult = await pool.query(
+      `SELECT id, run_id, title, angle, reason, effort, cta, score
+       FROM video_ideas
+       WHERE id = $1`,
+      [id]
+    );
+    if (ideaResult.rows.length === 0) return res.status(404).json({ error: "idea not found" });
+    const idea = ideaResult.rows[0];
+
+    if (!refresh) {
+      const cached = await getCachedInsight(idea.run_id, `idea-brief:${idea.id}`);
+      if (cached) {
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(idea.run_id, `idea-brief:${idea.id}`, normalized);
+        }
+        return res.json({ brief: normalized, cached: true, updatedAt: cached.updatedAt });
+      }
+    }
+
+    const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [idea.run_id]);
+    if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
+
+    const notesResult = await pool.query(
+      `SELECT notes FROM idea_ideation_notes WHERE idea_id = $1`,
+      [idea.id]
+    );
+    const notes = notesResult.rows[0]?.notes || "";
+
+    const videosResult = await pool.query(
+      `SELECT v.title, v.description, v.view_count, v.duration_seconds, c.title AS channel_title
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
+       ORDER BY v.view_count DESC NULLS LAST
+       LIMIT 20`,
+      [idea.run_id, MIN_LONG_SECONDS]
+    );
+
+    const topicsCached = await getCachedInsight(idea.run_id, "topics");
+    const topicsSummary = topicsCached ? normalizeGeminiInsight(topicsCached.content) : null;
+
+    const prompt = buildIdeaBriefPrompt({
+      idea,
+      run: runResult.rows[0],
+      videos: videosResult.rows,
+      topicsSummary,
+      maxWeeklyHours: MAX_WEEKLY_HOURS,
+      notes,
+    });
+
+    const rawBrief = await generateInsights(prompt, IDEA_BRIEF_SCHEMA);
+    const brief = normalizeGeminiInsight(rawBrief);
+    const updatedAt = await saveCachedInsight(idea.run_id, `idea-brief:${idea.id}`, brief);
+    res.json({ brief, cached: false, updatedAt });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.post("/api/ideas/:id/notes", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const notes = String(req.body.notes || "");
+    if (!id) return res.status(400).json({ error: "id is required" });
+    const result = await pool.query(
+      `INSERT INTO idea_ideation_notes (idea_id, notes, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (idea_id)
+       DO UPDATE SET notes = EXCLUDED.notes, updated_at = NOW()
+       RETURNING notes, updated_at`,
+      [id, notes]
+    );
+    res.json({ notes: result.rows[0]?.notes || notes, updatedAt: result.rows[0]?.updated_at });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.post("/api/ideas/:id/chat", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const message = String(req.body.message || "").trim();
+    if (!id || !message) return res.status(400).json({ error: "id and message are required" });
+
+    const ideaResult = await pool.query(
+      `SELECT id, title, angle, reason, effort, cta, score
+       FROM video_ideas
+       WHERE id = $1`,
+      [id]
+    );
+    if (ideaResult.rows.length === 0) return res.status(404).json({ error: "idea not found" });
+    const idea = ideaResult.rows[0];
+
+    await pool.query(
+      `INSERT INTO idea_ideation_messages (idea_id, role, content)
+       VALUES ($1, $2, $3)`,
+      [idea.id, "user", message]
+    );
+
+    const notesResult = await pool.query(
+      `SELECT notes FROM idea_ideation_notes WHERE idea_id = $1`,
+      [idea.id]
+    );
+    const notes = notesResult.rows[0]?.notes || "";
+
+    const messagesResult = await pool.query(
+      `SELECT role, content
+       FROM idea_ideation_messages
+       WHERE idea_id = $1
+       ORDER BY id DESC
+       LIMIT 10`,
+      [idea.id]
+    );
+    const history = messagesResult.rows.reverse();
+
+    const prompt = buildIdeaChatPrompt(idea, notes, history);
+    const reply = await generateText(prompt);
+
+    await pool.query(
+      `INSERT INTO idea_ideation_messages (idea_id, role, content)
+       VALUES ($1, $2, $3)`,
+      [idea.id, "assistant", reply]
+    );
+
+    res.json({ reply });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
 app.get("/api/plan/month/video", async (req, res) => {
   try {
     const runId = Number(req.query.runId);
@@ -841,11 +1017,19 @@ app.get("/api/plan/month/video", async (req, res) => {
       [runId, planData.planUpdatedAt, videoIndex]
     );
 
+    const briefCached = await getCachedInsight(
+      runId,
+      `plan-brief:${planData.planUpdatedAt}:${videoIndex}`
+    );
+    const brief = briefCached ? normalizeGeminiInsight(briefCached.content) : null;
+
     res.json({
       planUpdatedAt: planData.planUpdatedAt,
       video: planData.video,
       notes: notesResult.rows[0]?.notes || "",
       messages: messagesResult.rows || [],
+      brief,
+      briefUpdatedAt: briefCached?.updatedAt || null,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Unexpected error" });
@@ -921,6 +1105,75 @@ app.post("/api/plan/month/video/chat", async (req, res) => {
     );
 
     res.json({ reply });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unexpected error" });
+  }
+});
+
+app.post("/api/plan/month/video/brief", async (req, res) => {
+  try {
+    const runId = Number(req.body.runId);
+    const videoIndex = Number(req.body.index);
+    const planUpdatedAt = String(req.body.planUpdatedAt || "");
+    const refresh = req.query.refresh === "1";
+    if (!runId || Number.isNaN(videoIndex) || !planUpdatedAt) {
+      return res.status(400).json({ error: "runId, index and planUpdatedAt are required" });
+    }
+
+    const planData = await loadMonthPlanVideo(runId, videoIndex, planUpdatedAt);
+
+    if (!refresh) {
+      const cached = await getCachedInsight(
+        runId,
+        `plan-brief:${planData.planUpdatedAt}:${videoIndex}`
+      );
+      if (cached) {
+        const normalized = normalizeGeminiInsight(cached.content);
+        if (typeof cached.content === "string" || (cached.content && cached.content.raw)) {
+          await saveCachedInsight(runId, `plan-brief:${planData.planUpdatedAt}:${videoIndex}`, normalized);
+        }
+        return res.json({ brief: normalized, cached: true, updatedAt: cached.updatedAt });
+      }
+    }
+
+    const notesResult = await pool.query(
+      `SELECT notes FROM video_ideation_notes
+       WHERE run_id = $1 AND plan_updated_at = $2 AND video_index = $3`,
+      [runId, planData.planUpdatedAt, videoIndex]
+    );
+    const notes = notesResult.rows[0]?.notes || "";
+
+    const runResult = await pool.query("SELECT * FROM search_runs WHERE id = $1", [runId]);
+    if (runResult.rows.length === 0) return res.status(404).json({ error: "run not found" });
+
+    const videosResult = await pool.query(
+      `SELECT v.title, v.description, v.view_count, v.duration_seconds, c.title AS channel_title
+       FROM search_run_videos srv
+       JOIN videos v ON v.id = srv.video_id
+       JOIN channels c ON c.id = v.channel_id
+       WHERE srv.run_id = $1
+         AND v.duration_seconds >= $2
+       ORDER BY v.view_count DESC NULLS LAST
+       LIMIT 18`,
+      [runId, MIN_LONG_SECONDS]
+    );
+
+    const topicsCached = await getCachedInsight(runId, "topics");
+    const topicsSummary = topicsCached ? normalizeGeminiInsight(topicsCached.content) : null;
+
+    const prompt = buildPlanVideoBriefPrompt({
+      video: planData.video,
+      run: runResult.rows[0],
+      videos: videosResult.rows,
+      topicsSummary,
+      maxWeeklyHours: MAX_WEEKLY_HOURS,
+      notes,
+    });
+
+    const rawBrief = await generateInsights(prompt, IDEA_BRIEF_SCHEMA);
+    const brief = normalizeGeminiInsight(rawBrief);
+    const updatedAt = await saveCachedInsight(runId, `plan-brief:${planData.planUpdatedAt}:${videoIndex}`, brief);
+    res.json({ brief, cached: false, updatedAt });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Unexpected error" });
   }
@@ -1496,6 +1749,190 @@ Contexto del mercado:
 
 Muestra de videos con tracción:
 ${list}`;
+}
+
+const IDEA_BRIEF_SCHEMA = {
+  type: "object",
+  properties: {
+    hook: { type: "string" },
+    estructura: { type: "array", items: { type: "string" } },
+    puntos_clave: { type: "array", items: { type: "string" } },
+    ejemplo_practico: { type: "string" },
+    recursos: { type: "array", items: { type: "string" } },
+    titulo_youtube: { type: "string" },
+    miniatura_idea: { type: "string" },
+    autoridad_checklist: { type: "array", items: { type: "string" } },
+    cta: { type: "string" },
+  },
+  required: [
+    "hook",
+    "estructura",
+    "puntos_clave",
+    "ejemplo_practico",
+    "recursos",
+    "titulo_youtube",
+    "miniatura_idea",
+    "autoridad_checklist",
+    "cta",
+  ],
+  additionalProperties: false,
+};
+
+function buildIdeaBriefPrompt(payload: {
+  idea: any;
+  run: any;
+  videos: Array<{ title: string; channel_title: string; view_count: number; duration_seconds: number }>;
+  topicsSummary?: any;
+  maxWeeklyHours: number;
+  notes?: string;
+}) {
+  const list = payload.videos
+    .map(
+      (video) =>
+        `- ${video.title} | ${video.channel_title} | ${video.view_count ?? "n/a"} views | ${Math.round(
+          (video.duration_seconds ?? 0) / 60
+        )} min`
+    )
+    .join("\n");
+
+  const topicText = payload.topicsSummary
+    ? JSON.stringify(payload.topicsSummary)
+    : "No hay mapa de temas aún. Deduce pilares a partir de los títulos del mercado.";
+
+  return `Eres productor ejecutivo y estratega de YouTube en español.
+Canal: IA aplicada al desarrollo de software. Objetivo: autoridad técnica (no influencer).
+
+Genera un brief ejecutable para este vídeo. Debe ahorrar tiempo de preparación.
+Tiempo disponible: ${payload.maxWeeklyHours} horas/semana. Duración objetivo 15-30 min.
+
+Idea base:
+- Título: ${payload.idea.title}
+- Ángulo: ${payload.idea.angle || "No especificado"}
+- Razón: ${payload.idea.reason || "No especificada"}
+- Esfuerzo: ${payload.idea.effort || "medio"}
+- CTA: ${payload.idea.cta || "n/a"}
+
+Notas del creador:
+${payload.notes || "Sin notas"}
+
+Mapa de temas:
+${topicText}
+
+Muestra de mercado:
+${list}
+
+Devuelve SOLO JSON válido con esta estructura exacta:
+{
+  "hook": "...",
+  "estructura": ["...","...","..."],
+  "puntos_clave": ["...","..."],
+  "ejemplo_practico": "...",
+  "recursos": ["...","..."],
+  "titulo_youtube": "...",
+  "miniatura_idea": "...",
+  "autoridad_checklist": ["...","..."],
+  "cta": "..."
+}
+
+Reglas:
+- El hook debe ser técnico y concreto.
+- Incluye al menos un ejemplo práctico o demo.
+- Evita clickbait; prioriza criterio y metodologías.
+- CTA coherente con autoridad (lead magnet, checklist, newsletter o formación si encaja).`;
+}
+
+function buildIdeaChatPrompt(
+  idea: any,
+  notes: string,
+  messages: Array<{ role: string; content: string }>
+) {
+  const history = messages
+    .map((item) => `${item.role === "user" ? "Usuario" : "Asistente"}: ${item.content}`)
+    .join("\n");
+
+  return `Eres productor y guionista de YouTube en español.
+Canal: IA aplicada al desarrollo de software. Objetivo: autoridad técnica (no influencer).
+
+Idea:
+- Título: ${idea.title}
+- Ángulo: ${idea.angle || "No especificado"}
+- CTA: ${idea.cta || "n/a"}
+- Razón estratégica: ${idea.reason || "n/a"}
+
+Notas del creador:
+${notes || "Sin notas aún."}
+
+Conversación reciente:
+${history || "Sin historial."}
+
+Instrucciones:
+- Responde en español, conciso y accionable.
+- Si piden guion, entrega estructura por secciones con bullets.
+- Si detectas huecos, pregunta una sola cosa clave para avanzar.
+- Evita tono hype o influencer.`;
+}
+
+function buildPlanVideoBriefPrompt(payload: {
+  video: any;
+  run: any;
+  videos: Array<{ title: string; channel_title: string; view_count: number; duration_seconds: number }>;
+  topicsSummary?: any;
+  maxWeeklyHours: number;
+  notes?: string;
+}) {
+  const list = payload.videos
+    .map(
+      (video) =>
+        `- ${video.title} | ${video.channel_title} | ${video.view_count ?? "n/a"} views | ${Math.round(
+          (video.duration_seconds ?? 0) / 60
+        )} min`
+    )
+    .join("\n");
+
+  const topicText = payload.topicsSummary
+    ? JSON.stringify(payload.topicsSummary)
+    : "No hay mapa de temas aún. Deduce pilares a partir de los títulos del mercado.";
+
+  return `Eres productor ejecutivo y estratega de YouTube en español.
+Canal: IA aplicada al desarrollo de software. Objetivo: autoridad técnica (no influencer).
+
+Genera un brief ejecutable para este vídeo del plan del mes.
+Tiempo disponible: ${payload.maxWeeklyHours} horas/semana. Duración objetivo 15-30 min.
+
+Idea base:
+- Título: ${payload.video.titulo}
+- Ángulo: ${payload.video.angulo || "No especificado"}
+- Razón: ${payload.video.razon || "No especificada"}
+- Esfuerzo: ${payload.video.esfuerzo || "medio"}
+- CTA: ${payload.video.cta || "n/a"}
+
+Notas del creador:
+${payload.notes || "Sin notas"}
+
+Mapa de temas:
+${topicText}
+
+Muestra de mercado:
+${list}
+
+Devuelve SOLO JSON válido con esta estructura exacta:
+{
+  "hook": "...",
+  "estructura": ["...","...","..."],
+  "puntos_clave": ["...","..."],
+  "ejemplo_practico": "...",
+  "recursos": ["...","..."],
+  "titulo_youtube": "...",
+  "miniatura_idea": "...",
+  "autoridad_checklist": ["...","..."],
+  "cta": "..."
+}
+
+Reglas:
+- El hook debe ser técnico y concreto.
+- Incluye al menos un ejemplo práctico o demo.
+- Evita clickbait; prioriza criterio y metodologías.
+- CTA coherente con autoridad (lead magnet, checklist, newsletter o formación si encaja).`;
 }
 
 const NEXT_DECISION_SCHEMA = {

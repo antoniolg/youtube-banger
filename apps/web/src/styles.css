@@ -740,6 +740,15 @@ button:focus-visible {
   margin-bottom: 0.6rem;
 }
 
+.brief-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.brief-grid h4 {
+  margin-bottom: 0.4rem;
+}
+
 .notes-area {
   width: 100%;
   border-radius: var(--radius-md);
